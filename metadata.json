@@ -1,0 +1,8 @@
+{
+  "name": "Northstar",
+  "description": "Institutional-grade investment research and decision platform for serious retail investors.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
