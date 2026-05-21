@@ -88,7 +88,7 @@ export default function Dashboard() {
   } = useQuery({
     queryKey: ['fear-greed-index'],
     queryFn: () => getFearGreedIndex(),
-    refetchInterval: 60 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 
   const getMockHoldingsNews = () => {
@@ -256,42 +256,46 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 space-y-4 max-w-[1600px] mx-auto">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+      {/* Top Summary */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 xl:auto-rows-[168px]">
         {[
-          { 
-            label: 'TOTAL VALUE', 
+          {
+            label: 'TOTAL VALUE',
             value: formatCurrency(metrics.totalValue),
-            subline: <span className="text-primary">+$1,243 TODAY / +0.97%</span>
+            subline: <span className="text-primary">+$1,243 TODAY / +0.97%</span>,
+            className: 'xl:col-span-2 xl:row-start-1',
           },
-          { 
-            label: 'COST BASIS', 
+          {
+            label: 'COST BASIS',
             value: formatCurrency(metrics.totalCostBasis),
-            subline: <span className="text-muted-foreground font-bold">{positions.length} POSITIONS</span>
+            subline: <span className="text-muted-foreground font-bold">{positions.length} POSITIONS</span>,
+            className: 'xl:col-start-3 xl:row-start-1',
           },
-          { 
-            label: 'TOTAL P&L', 
-            value: formatCurrency(metrics.totalPnL), 
+          {
+            label: 'TOTAL P&L',
+            value: formatCurrency(metrics.totalPnL),
             sub: `${metrics.pnlPercentage.toFixed(2)}%`,
             color: metrics.totalPnL >= 0 ? 'text-positive' : 'text-negative',
-            subline: <span className="text-muted-foreground">SINCE JAN 2025</span>
+            subline: <span className="text-muted-foreground">SINCE JAN 2025</span>,
+            className: 'xl:col-start-1 xl:row-start-2',
           },
-          { 
-            label: 'VS SPY', 
-            value: '+4.7%', 
-            sub: 'RELATIVE ALPHA', 
+          {
+            label: 'VS SPY',
+            value: '+4.7%',
+            sub: 'RELATIVE ALPHA',
             color: 'text-positive',
             subline: (
               <div className="flex gap-2">
                 <span className="text-muted-foreground">SPY: +12.3%</span>
                 <span className="text-primary font-bold">ALPHA: +4.7%</span>
               </div>
-            )
+            ),
+            className: 'xl:col-start-2 xl:row-start-2',
           },
-          { 
-            label: 'CASH', 
+          {
+            label: 'CASH',
             value: isEditingCash ? (
-              <Input 
+              <Input
                 value={tempCashValue}
                 onChange={(e) => setTempCashValue(e.target.value)}
                 onBlur={() => {
@@ -307,13 +311,16 @@ export default function Dashboard() {
                   }
                 }}
                 autoFocus
-                className="h-7 w-24 text-[14px] bg-background border-primary rounded-none font-mono"
+                className="h-7 w-24 rounded-none border-primary bg-background font-mono text-[14px]"
               />
             ) : (
-              <span onDoubleClick={() => {
-                setIsEditingCash(true);
-                setTempCashValue(cash.toString());
-              }} className="cursor-pointer">
+              <span
+                onDoubleClick={() => {
+                  setIsEditingCash(true);
+                  setTempCashValue(cash.toString());
+                }}
+                className="cursor-pointer"
+              >
                 {formatCurrency(cash)}
               </span>
             ),
@@ -322,45 +329,57 @@ export default function Dashboard() {
               const belowFloor = cashPerc < profile.cashFloor;
               return (
                 <div className="flex flex-col gap-1">
-                   <span className="text-muted-foreground">{cashPerc.toFixed(1)}% OF PORTFOLIO</span>
-                   {belowFloor && <span className="text-negative font-bold flex items-center gap-1.5"><AlertTriangle size={10} /> BELOW FLOOR</span>}
+                  <span className="text-muted-foreground">{cashPerc.toFixed(1)}% OF PORTFOLIO</span>
+                  {belowFloor && <span className="text-negative font-bold flex items-center gap-1.5"><AlertTriangle size={10} /> BELOW FLOOR</span>}
                 </div>
               );
             })(),
-            highlight: (cash / metrics.totalValue) * 100 < profile.cashFloor
+            highlight: (cash / metrics.totalValue) * 100 < profile.cashFloor,
+            className: 'xl:col-start-3 xl:row-start-2',
           },
         ].map((kpi, i) => (
-          <Card key={i} className={`rounded-none bg-background border-border terminal-border ${kpi.highlight ? 'border-red-500/50 ring-1 ring-red-500/20' : ''}`}>
-            <CardContent className="p-4">
-              <p className="label-text">{kpi.label}</p>
-              <div className="flex items-baseline gap-2 mt-2">
-                <span className={`data-value ${kpi.color || 'text-foreground'}`}>{kpi.value}</span>
-                {kpi.sub && <span className="text-[12px] font-mono text-muted-foreground">{kpi.sub}</span>}
+          <Card
+            key={i}
+            className={`h-full rounded-none bg-background border-border terminal-border ${kpi.className ?? ''} ${kpi.highlight ? 'border-red-500/50 ring-1 ring-red-500/20' : ''}`}
+          >
+            <CardContent className="flex h-full flex-col justify-between p-4">
+              <div>
+                <p className="label-text">{kpi.label}</p>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className={`data-value ${kpi.color || 'text-foreground'}`}>{kpi.value}</span>
+                  {kpi.sub && <span className="text-[12px] font-mono text-muted-foreground">{kpi.sub}</span>}
+                </div>
               </div>
-              <div className="text-[11px] font-mono mt-2 opacity-80">
+              <div className="mt-3 text-[11px] font-mono opacity-80">
                 {kpi.subline}
               </div>
             </CardContent>
           </Card>
         ))}
-      </div>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
-        <div className="p-2 px-4 border-b border-border">
-          <h2 className="label-text">Market Sentiment (Fear &amp; Greed)</h2>
-        </div>
-        <CardContent className="p-4">
-          {fearGreedLoading ? (
-            <div className="text-sm font-mono text-muted-foreground">Loading Fear &amp; Greed index...</div>
-          ) : fearGreedError || !fearGreed ? (
-            <div className="text-sm font-mono text-negative">Failed to load Fear &amp; Greed index.</div>
-          ) : (
-            <div className="max-w-[340px]">
-              <FearGreedGauge value={fearGreed.value} classification={fearGreed.classification} />
+        <Card className="h-full rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden xl:col-start-4 xl:row-span-2 xl:row-start-1">
+          <CardContent className="flex h-full flex-col p-4">
+            <div className="space-y-1">
+              <p className="label-text">FEAR &amp; GREED INDEX</p>
+              <p className="text-[12px] font-mono text-muted-foreground">Live CNN market sentiment.</p>
             </div>
-          )}
-        </CardContent>
-      </Card>
+
+            <div className="mt-4 flex flex-1 items-center justify-center">
+              {fearGreedLoading ? (
+                <div className="text-sm font-mono text-muted-foreground">Loading Fear &amp; Greed index...</div>
+              ) : fearGreedError || !fearGreed ? (
+                <div className="text-sm font-mono text-negative">Failed to load Fear &amp; Greed index.</div>
+              ) : (
+                <FearGreedGauge
+                  value={fearGreed.value}
+                  classification={fearGreed.classification}
+                  updatedAt={fearGreed.updatedAt}
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Holdings Table */}
       <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">

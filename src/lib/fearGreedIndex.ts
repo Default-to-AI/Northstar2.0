@@ -1,36 +1,24 @@
-export interface FearGreedSnapshot {
-  value: number;
-  classification: string;
-}
+import { FearGreedSnapshot } from './fearGreedService';
 
-interface ApiItem {
-  value: string;
-  value_classification: string;
-}
-
-interface ApiResponse {
-  data?: ApiItem[];
-}
-
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
 let cache: { snapshot: FearGreedSnapshot; expiresAt: number } | null = null;
 
-function toSnapshot(payload: ApiResponse): FearGreedSnapshot {
-  const item = payload?.data?.[0];
-  if (!item || typeof item.value !== 'string' || typeof item.value_classification !== 'string') {
-    throw new Error('Invalid Fear & Greed API payload shape');
+function isFearGreedSnapshot(value: unknown): value is FearGreedSnapshot {
+  if (!value || typeof value !== 'object') {
+    return false;
   }
 
-  const parsedValue = Number.parseInt(item.value, 10);
-  if (!Number.isFinite(parsedValue)) {
-    throw new Error('Invalid Fear & Greed value');
-  }
-
-  return {
-    value: Math.max(0, Math.min(100, parsedValue)),
-    classification: item.value_classification.trim() || 'Unknown',
-  };
+  const snapshot = value as Record<string, unknown>;
+  return (
+    typeof snapshot.value === 'number'
+    && typeof snapshot.classification === 'string'
+    && typeof snapshot.updatedAt === 'string'
+    && typeof snapshot.previousClose === 'number'
+    && typeof snapshot.previousWeek === 'number'
+    && typeof snapshot.previousMonth === 'number'
+    && typeof snapshot.previousYear === 'number'
+  );
 }
 
 export async function getFearGreedIndex(nowMs: number = Date.now()): Promise<FearGreedSnapshot> {
@@ -38,17 +26,28 @@ export async function getFearGreedIndex(nowMs: number = Date.now()): Promise<Fea
     return cache.snapshot;
   }
 
-  const response = await fetch('https://api.alternative.me/fng/?limit=1');
+  const response = await fetch('/api/market/fear-greed');
   if (!response.ok) {
     throw new Error(`Fear & Greed API request failed: ${response.status}`);
   }
 
-  const payload = (await response.json()) as ApiResponse;
-  const snapshot = toSnapshot(payload);
+  const payload = (await response.json()) as unknown;
+  if (!isFearGreedSnapshot(payload)) {
+    throw new Error('Invalid Fear & Greed API payload shape');
+  }
+
+  const snapshot: FearGreedSnapshot = {
+    ...payload,
+    value: Math.max(0, Math.min(100, Math.round(payload.value))),
+    previousClose: Math.max(0, Math.min(100, Math.round(payload.previousClose))),
+    previousWeek: Math.max(0, Math.min(100, Math.round(payload.previousWeek))),
+    previousMonth: Math.max(0, Math.min(100, Math.round(payload.previousMonth))),
+    previousYear: Math.max(0, Math.min(100, Math.round(payload.previousYear))),
+  };
 
   cache = {
     snapshot,
-    expiresAt: nowMs + ONE_HOUR_MS,
+    expiresAt: nowMs + FIVE_MINUTES_MS,
   };
 
   return snapshot;
