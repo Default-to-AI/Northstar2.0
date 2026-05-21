@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { fetchCnnFearGreedSnapshot } from "./src/lib/fearGreedService";
 
 dotenv.config();
 
@@ -171,6 +172,16 @@ async function startServer() {
     } catch (error) {
       console.error("Committee error:", error);
       res.status(500).json({ error: "Failed to run committee session" });
+    }
+  });
+
+  app.get("/api/market/fear-greed", async (_req, res) => {
+    try {
+      const snapshot = await fetchCnnFearGreedSnapshot();
+      res.json(snapshot);
+    } catch (error) {
+      console.error("Fear & Greed fetch error:", error);
+      res.status(500).json({ error: "Failed to fetch Fear & Greed index" });
     }
   });
 
