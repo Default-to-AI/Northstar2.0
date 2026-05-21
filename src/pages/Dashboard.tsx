@@ -37,6 +37,8 @@ import { Position } from '@/src/types';
 import { WatchlistDialog } from '@/src/components/WatchlistDialog';
 import { ThesisDrawer } from '@/src/components/ThesisDrawer';
 import { CsvImportDialog } from '@/src/components/CsvImportDialog';
+import { FearGreedGauge } from '@/src/components/FearGreedGauge';
+import { getFearGreedIndex } from '@/src/lib/fearGreedIndex';
 import { useQuery } from '@tanstack/react-query';
 
 // Chart Colors
@@ -60,8 +62,14 @@ export default function Dashboard() {
         : '/api/news/market';
       const res = await fetch(url);
       if (!res.ok) return [];
-      const data = await res.json();
-      return data.map((item: any) => ({
+      const data = (await res.json()) as Array<{
+        ticker?: string;
+        datetime: number;
+        headline: string;
+        source: string;
+        url: string;
+      }>;
+      return data.map((item) => ({
         ticker: item.ticker || 'MKT',
         time: new Date(item.datetime * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         headline: item.headline,
@@ -71,6 +79,16 @@ export default function Dashboard() {
     },
     enabled: true,
     refetchInterval: 300000 // 5 mins
+  });
+
+  const {
+    data: fearGreed,
+    isLoading: fearGreedLoading,
+    isError: fearGreedError,
+  } = useQuery({
+    queryKey: ['fear-greed-index'],
+    queryFn: () => getFearGreedIndex(),
+    refetchInterval: 60 * 60 * 1000,
   });
 
   const getMockHoldingsNews = () => {
@@ -326,6 +344,23 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+        <div className="p-2 px-4 border-b border-border">
+          <h2 className="label-text">Market Sentiment (Fear &amp; Greed)</h2>
+        </div>
+        <CardContent className="p-4">
+          {fearGreedLoading ? (
+            <div className="text-sm font-mono text-muted-foreground">Loading Fear &amp; Greed index...</div>
+          ) : fearGreedError || !fearGreed ? (
+            <div className="text-sm font-mono text-negative">Failed to load Fear &amp; Greed index.</div>
+          ) : (
+            <div className="max-w-[340px]">
+              <FearGreedGauge value={fearGreed.value} classification={fearGreed.classification} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Holdings Table */}
       <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
