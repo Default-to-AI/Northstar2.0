@@ -281,12 +281,33 @@ export default function Dashboard() {
     return spyDataPoints;
   })();
 
+  // ── Timeframe label ──────────────────────────────────────────────
+  const timeframeLabel = chartTimeframe === 'ytd' ? 'YTD' : chartTimeframe === 'mtd' ? 'MTD' : '1Y';
+
   // ── Compute VS SPY / Alpha KPIs ──────────────────────────────────
   const spyReturnPct = (() => {
     if (!spyHistoryRaw?.data || spyHistoryRaw.data.length < 2) return null;
     const raw = spyHistoryRaw.data;
-    const first = raw[0].close;
-    const last = raw[raw.length - 1].close;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    let filtered: typeof raw;
+    if (chartTimeframe === 'ytd') {
+      const jan1 = new Date(currentYear, 0, 1).getTime() / 1000;
+      filtered = raw.filter((d) => d.timestamp >= jan1);
+    } else if (chartTimeframe === 'mtd') {
+      const monthStart = new Date(currentYear, currentMonth, 1).getTime() / 1000;
+      filtered = raw.filter((d) => d.timestamp >= monthStart);
+    } else {
+      filtered = raw;
+    }
+    if (filtered.length < 2) {
+      const slice = raw.slice(-Math.min(raw.length, 30));
+      if (slice.length < 2) return null;
+      filtered = slice;
+    }
+    const first = filtered[0].close;
+    const last = filtered[filtered.length - 1].close;
     if (!first || first <= 0 || !last || last <= 0) return null;
     return ((last - first) / first) * 100;
   })();
@@ -365,13 +386,16 @@ export default function Dashboard() {
             className: 'xl:col-start-1 xl:row-start-2',
           },
           {
-            label: 'VS SPY',
+            label: `VS SPY (${timeframeLabel})`,
             value: alphaPct !== null ? pnlLabel(alphaPct) : '...',
             sub: 'RELATIVE ALPHA',
             color: alphaPct !== null && alphaPct >= 0 ? 'text-positive' : alphaPct !== null && alphaPct < 0 ? 'text-negative' : 'text-muted-foreground',
             subline: (
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">SPY: {pnlLabel(spyReturnPct)}</span>
+              <div className="flex flex-col gap-0.5">
+                <div className="flex gap-2">
+                  <span className="text-muted-foreground">SPY: {pnlLabel(spyReturnPct)} ({timeframeLabel})</span>
+                  <span className="text-muted-foreground">PF: {pnlLabel(portfolioReturnPct)} (lifetime)</span>
+                </div>
                 <span className="text-primary font-bold">ALPHA: {pnlLabel(alphaPct)}</span>
               </div>
             ),
