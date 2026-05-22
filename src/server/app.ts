@@ -25,6 +25,14 @@ type StockMetricsQuery = {
   symbol?: string;
 };
 
+type BatchPricesQuery = {
+  tickers?: string;
+};
+
+type SpyHistoryQuery = {
+  range?: string;
+};
+
 type FinnhubNewsItem = {
   datetime: number;
   [key: string]: unknown;
@@ -257,7 +265,7 @@ function registerApiRoutes(app: Express): void {
 
     try {
       const response = await fetch(
-        `https://finnhub.io/api/v1/news?category=general&token=${finnhubKey}`,
+        `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(finnhubKey)}`,
       );
       const data = (await response.json()) as FinnhubNewsItem[];
       return res.json(data.slice(0, 10));
@@ -289,7 +297,7 @@ function registerApiRoutes(app: Express): void {
         const allNews = await Promise.all(
           tickers.slice(0, 5).map(async (ticker) => {
             const response = await fetch(
-              `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${weekAgo}&to=${today}&token=${finnhubKey}`,
+              `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${weekAgo}&to=${today}&token=${encodeURIComponent(finnhubKey)}`,
             );
             const data = (await response.json()) as FinnhubNewsItem[];
 
@@ -324,7 +332,7 @@ function registerApiRoutes(app: Express): void {
 
       try {
         const response = await fetch(
-          `https://finnhub.io/api/v1/stock/metric?symbol=${symbol}&metric=all&token=${finnhubKey}`,
+          `https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(symbol)}&metric=all&token=${encodeURIComponent(finnhubKey)}`,
         );
         const data = (await response.json()) as FinnhubMetricResponse;
         return res.json(data.metric ?? {});
@@ -334,7 +342,141 @@ function registerApiRoutes(app: Express): void {
       }
     },
   );
+
+  /**
+   * Batch price lookup via Yahoo Finance (no API key required).
+   * GET /api/stock/batch-prices?tickers=SPY,AAPL,MSFT
+   */
+  app.get(
+    '/api/stock/batch-prices',
+    async (
+      req: Request<Record<string, never>, unknown, unknown, BatchPricesQuery>,
+      res: Response,
+    ) => {
+      const {tickers} = req.query;
+      if (!tickers || typeof tickers !== 'string' || tickers.length === 0) {
+        return res.status(400).json({error: 'Missing tickers parameter'});
+      }
+
+      try {
+        // Fetch individual prices using the chart endpoint (more reliable than v7/quote)
+        const tickerList = tickers.split(',').map((t) => t.trim()).filter(Boolean);
+        const prices: Record<string, number> = {};
+
+        await Promise.all(
+          tickerList.map(async (ticker) => {
+            try {
+              const resp = await fetch(
+                `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=1d&interval=1d`,
+                {headers: YAHOO_HEADERS},
+              );
+              if (!resp.ok) return;
+              const data = (await resp.json()) as {
+                chart?: {
+                  result?: Array<{
+                    meta?: {regularMarketPrice?: number};
+                  }>;
+                };
+              };
+              const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+              if (typeof price === 'number' && Number.isFinite(price)) {
+                prices[ticker] = price;
+              }
+            } catch {
+              // Individual ticker failure is non-fatal
+            }
+          }),
+        );
+
+        if (Object.keys(prices).length === 0) {
+          return res.status(502).json({error: 'No prices could be fetched'});
+        }
+
+        return res.json({prices});
+      } catch (error) {
+        console.error('Batch prices error:', error);
+        return res.status(500).json({error: 'Failed to fetch batch prices'});
+      }
+    },
+  );
+
+  /**
+   * SPY historical price data for cumulative return calculation.
+   * GET /api/stock/spy-history?range=1y
+   * Range options: 1y (default), ytd, mtd
+   */
+  app.get(
+    '/api/stock/spy-history',
+    async (
+      req: Request<Record<string, never>, unknown, unknown, SpyHistoryQuery>,
+      res: Response,
+    ) => {
+      const rawRange = req.query.range;
+      // Always fetch 1y to allow client-side filtering for ytd/mtd
+      const yahooRange = '1y';
+      const timeframe = rawRange === 'ytd' || rawRange === 'mtd' ? rawRange : '1y';
+
+      try {
+        const response = await fetch(
+          `https://query1.finance.yahoo.com/v8/finance/chart/SPY?range=${yahooRange}&interval=1d`,
+          {headers: YAHOO_HEADERS},
+        );
+        if (!response.ok) {
+          console.error(`Yahoo Finance chart API returned ${response.status}`);
+          return res.status(502).json({error: 'Upstream chart API error'});
+        }
+        const data = (await response.json()) as {
+          chart?: {
+            result?: Array<{
+              timestamp?: number[];
+              indicators?: {
+                quote?: Array<{
+                  close?: (number | null)[];
+                }>;
+              };
+            }>;
+            error?: unknown;
+          };
+        };
+        const result = data?.chart?.result?.[0];
+        if (!result) {
+          return res.status(500).json({
+            error: 'No data from Yahoo Finance',
+            raw: data?.chart?.error ?? null,
+          });
+        }
+
+        const timestamps: number[] = (result.timestamp ?? []) as number[];
+        const closes: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+
+        // Zip and filter out null closes
+        const paired: Array<{timestamp: number; close: number}> = [];
+        for (let i = 0; i < timestamps.length; i++) {
+          const c = closes[i];
+          if (c !== null && c !== undefined && Number.isFinite(c)) {
+            paired.push({timestamp: timestamps[i], close: c});
+          }
+        }
+
+        if (paired.length === 0) {
+          return res.status(500).json({error: 'No valid price data points'});
+        }
+
+        return res.json({data: paired, timeframe});
+      } catch (error) {
+        console.error('SPY history error:', error);
+        return res.status(500).json({error: 'Failed to fetch SPY history'});
+      }
+    },
+  );
 }
+
+const YAHOO_HEADERS: HeadersInit = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Accept: '*/*',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
 
 export async function createApp(): Promise<Express> {
   const app = express();

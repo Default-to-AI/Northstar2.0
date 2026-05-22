@@ -45,6 +45,24 @@ import { useQuery } from '@tanstack/react-query';
 const SECTOR_COLORS = ['#f5c518', '#8e8e9e', '#3b82f6', '#00c896', '#ff4757', '#a855f7', '#ec4899'];
 const FONT_MONO = { fontFamily: 'JetBrains Mono', fontSize: 12 };
 
+// ── Date helpers ────────────────────────────────────────────────────
+function formatTimestamp(unixSeconds: number): string {
+  const d = new Date(unixSeconds * 1000);
+  const month = d.toLocaleString('en-US', { month: 'short' });
+  return `${month} ${d.getDate()}`;
+}
+
+function formatFullDate(unixSeconds: number, isLast: boolean): string {
+  const d = new Date(unixSeconds * 1000);
+  const opts: Intl.DateTimeFormatOptions = {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  };
+  const base = d.toLocaleDateString('en-US', opts);
+  return isLast ? `${base} (latest)` : base;
+}
+
 export default function Dashboard() {
   const { positions, metrics, cash, setCash, deletePosition, updatePosition, setPositions } = usePortfolioData();
   const { profile } = useInvestorProfile();
@@ -189,6 +207,111 @@ export default function Dashboard() {
   const [thesisDrawerOpen, setThesisDrawerOpen] = useState(false);
   const [activePosition, setActivePosition] = useState<Position | null>(null);
 
+  // ── SPY Historical Data ──────────────────────────────────────────
+  const { data: spyHistoryRaw, isLoading: spyLoading } = useQuery({
+    queryKey: ['spy-history', chartTimeframe],
+    queryFn: async () => {
+      const res = await fetch(`/api/stock/spy-history?range=${chartTimeframe}`);
+      if (!res.ok) throw new Error('Failed to fetch SPY history');
+      return res.json() as Promise<{
+        data: Array<{ timestamp: number; close: number }>;
+        timeframe: string;
+      }>;
+    },
+    refetchInterval: 300000, // 5 minutes
+    staleTime: 60000,
+  });
+
+  // ── Compute cumulative returns ───────────────────────────────────
+  const cumulativeReturnData = (() => {
+    if (!spyHistoryRaw?.data || spyHistoryRaw.data.length < 2) {
+      // Fallback while loading: return empty placeholder
+      return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
+    }
+
+    const raw = spyHistoryRaw.data;
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0-indexed
+
+    // Filter data points based on timeframe
+    let filtered: typeof raw;
+    if (chartTimeframe === 'ytd') {
+      const jan1 = new Date(currentYear, 0, 1).getTime() / 1000;
+      filtered = raw.filter((d) => d.timestamp >= jan1);
+    } else if (chartTimeframe === 'mtd') {
+      const monthStart = new Date(currentYear, currentMonth, 1).getTime() / 1000;
+      filtered = raw.filter((d) => d.timestamp >= monthStart);
+    } else {
+      filtered = raw; // 1y — full data from server
+    }
+
+    if (filtered.length < 2) {
+      // Not enough data points in range — fallback to last N days of raw data
+      const slice = raw.slice(-Math.min(raw.length, 30));
+      if (slice.length < 2) return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
+      filtered = slice;
+    }
+
+    const baselinePrice = filtered[0].close;
+    if (!baselinePrice || baselinePrice <= 0) {
+      return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
+    }
+
+    // SPY cumulative return % for each day
+    const portfolioReturnPct = metrics.totalCostBasis > 0
+      ? metrics.pnlPercentage
+      : 0;
+
+    const spyDataPoints = filtered.map((d) => {
+      const spyReturn = ((d.close - baselinePrice) / baselinePrice) * 100;
+      return {
+        date: formatTimestamp(d.timestamp),
+        portfolio: portfolioReturnPct, // Same current value for all points
+        spy: Math.round(spyReturn * 100) / 100,
+        fullDate: formatFullDate(d.timestamp, chartTimeframe === filtered[filtered.length - 1].timestamp),
+      };
+    });
+
+    // Overwrite first portfolio point to 0 (start of period)
+    if (spyDataPoints.length > 0) {
+      spyDataPoints[0] = { ...spyDataPoints[0], portfolio: 0 };
+    }
+
+    return spyDataPoints;
+  })();
+
+  // ── Compute VS SPY / Alpha KPIs ──────────────────────────────────
+  const spyReturnPct = (() => {
+    if (!spyHistoryRaw?.data || spyHistoryRaw.data.length < 2) return null;
+    const raw = spyHistoryRaw.data;
+    const first = raw[0].close;
+    const last = raw[raw.length - 1].close;
+    if (!first || first <= 0 || !last || last <= 0) return null;
+    return ((last - first) / first) * 100;
+  })();
+
+  const portfolioReturnPct = metrics.totalCostBasis > 0
+    ? metrics.pnlPercentage
+    : 0;
+
+  const alphaPct = spyReturnPct !== null
+    ? portfolioReturnPct - spyReturnPct
+    : null;
+
+  const pnlLabel = (val: number | null): string => {
+    if (val === null) return '...';
+    return `${val >= 0 ? '+' : ''}${val.toFixed(1)}%`;
+  };
+
+  // ── Last data point for chart button labels ──────────────────────
+  const lastSpyReturn = cumulativeReturnData.length > 1
+    ? cumulativeReturnData[cumulativeReturnData.length - 1].spy
+    : 0;
+  const lastPortfolioReturn = cumulativeReturnData.length > 1
+    ? cumulativeReturnData[cumulativeReturnData.length - 1].portfolio
+    : 0;
+
   // Prepare data for charts
   const sectorData: { name: string, value: number }[] = Object.entries(
     positions.reduce((acc, p) => {
@@ -209,44 +332,6 @@ export default function Dashboard() {
     ...d,
     fill: i === 0 ? '#f5c518' : '#475569'
   }));
-
-  const ytdReturnData = [
-    { date: 'Jan 1', portfolio: 0.00, spy: 0.00, fullDate: 'Jan 1, 2026' },
-    { date: 'Jan 31', portfolio: 3.20, spy: 1.80, fullDate: 'Jan 31, 2026' },
-    { date: 'Feb 28', portfolio: 1.10, spy: 0.50, fullDate: 'Feb 28, 2026' },
-    { date: 'Mar 31', portfolio: 7.40, spy: 3.50, fullDate: 'Mar 31, 2026' },
-    { date: 'Apr 30', portfolio: 12.60, spy: 6.20, fullDate: 'Apr 30, 2026' },
-    { date: 'May 20', portfolio: 16.14, spy: 10.25, fullDate: 'May 20, 2026 (YTD)' },
-  ];
-
-  const oneYearReturnData = [
-    { date: 'Jun 25', portfolio: 0.00, spy: 0.00, fullDate: 'Jun 1, 2025' },
-    { date: 'Jul 25', portfolio: 2.10, spy: 3.20, fullDate: 'Jul 1, 2025' },
-    { date: 'Aug 25', portfolio: -1.20, spy: 1.50, fullDate: 'Aug 1, 2025' },
-    { date: 'Sep 25', portfolio: -4.50, spy: -2.30, fullDate: 'Sep 1, 2025' },
-    { date: 'Oct 25', portfolio: -8.10, spy: -5.40, fullDate: 'Oct 1, 2025' },
-    { date: 'Nov 25', portfolio: -5.30, spy: -3.10, fullDate: 'Nov 1, 2025' },
-    { date: 'Dec 25', portfolio: -2.10, spy: 0.80, fullDate: 'Dec 1, 2025' },
-    { date: 'Jan 26', portfolio: 1.50, spy: 2.40, fullDate: 'Jan 1, 2026' },
-    { date: 'Feb 26', portfolio: -1.10, spy: 1.25, fullDate: 'Feb 1, 2026' },
-    { date: 'Mar 26', portfolio: 1.80, spy: 3.60, fullDate: 'Mar 1, 2026' },
-    { date: 'Apr 26', portfolio: -2.40, spy: 2.10, fullDate: 'Apr 1, 2026' },
-    { date: 'May 26', portfolio: 0.42, spy: 4.80, fullDate: 'May 20, 2026 (1Y)' },
-  ];
-
-  const mtdReturnData = [
-    { date: 'May 1', portfolio: 0.00, spy: 0.00, fullDate: 'May 1, 2026' },
-    { date: 'May 5', portfolio: 0.45, spy: 0.20, fullDate: 'May 5, 2026' },
-    { date: 'May 10', portfolio: 0.85, spy: 0.40, fullDate: 'May 10, 2026' },
-    { date: 'May 15', portfolio: 1.20, spy: 0.75, fullDate: 'May 15, 2026' },
-    { date: 'May 20', portfolio: 1.69, spy: 1.10, fullDate: 'May 20, 2026 (MTD)' },
-  ];
-
-  const cumulativeReturnData = chartTimeframe === 'ytd' 
-    ? ytdReturnData 
-    : chartTimeframe === '1y' 
-      ? oneYearReturnData 
-      : mtdReturnData;
 
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
@@ -281,13 +366,13 @@ export default function Dashboard() {
           },
           {
             label: 'VS SPY',
-            value: '+4.7%',
+            value: alphaPct !== null ? pnlLabel(alphaPct) : '...',
             sub: 'RELATIVE ALPHA',
-            color: 'text-positive',
+            color: alphaPct !== null && alphaPct >= 0 ? 'text-positive' : alphaPct !== null && alphaPct < 0 ? 'text-negative' : 'text-muted-foreground',
             subline: (
               <div className="flex gap-2">
-                <span className="text-muted-foreground">SPY: +12.3%</span>
-                <span className="text-primary font-bold">ALPHA: +4.7%</span>
+                <span className="text-muted-foreground">SPY: {pnlLabel(spyReturnPct)}</span>
+                <span className="text-primary font-bold">ALPHA: {pnlLabel(alphaPct)}</span>
               </div>
             ),
             className: 'xl:col-start-2 xl:row-start-2',
@@ -705,19 +790,19 @@ export default function Dashboard() {
               onClick={() => setChartTimeframe('ytd')}
               className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-colors border-r border-border ${chartTimeframe === 'ytd' ? 'bg-[#14141d] text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              YTD (+16.14%)
+              YTD ({pnlLabel(lastPortfolioReturn)})
             </button>
             <button
               onClick={() => setChartTimeframe('1y')}
               className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-colors border-r border-border ${chartTimeframe === '1y' ? 'bg-[#14141d] text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              1Y (+0.42%)
+              1Y ({pnlLabel(lastPortfolioReturn)})
             </button>
             <button
               onClick={() => setChartTimeframe('mtd')}
               className={`px-3 py-1.5 text-[10px] font-mono font-bold uppercase transition-colors ${chartTimeframe === 'mtd' ? 'bg-[#14141d] text-primary' : 'text-muted-foreground hover:text-foreground'}`}
             >
-              MTD (+1.69%)
+              MTD ({pnlLabel(lastPortfolioReturn)})
             </button>
           </div>
         </div>
