@@ -1,0 +1,23 @@
+{
+  "syncedAt": "2026-05-23T00:06:17.225Z",
+  "source": "ibkr-flex",
+  "nav": {
+    "startingValue": 0,
+    "endingValue": 0,
+    "depositsWithdrawals": 0,
+    "twr": 0,
+    "markToMarket": 0,
+    "fromDate": null,
+    "toDate": null
+  },
+  "cash": {
+    "startingCash": 0,
+    "endingCash": 0,
+    "endingSettledCash": 0,
+    "depositsWithdrawals": 0,
+    "dividends": 0,
+    "netTradesSales": 0,
+    "netTradesPurchases": 0
+  },
+  "positions": []
+}

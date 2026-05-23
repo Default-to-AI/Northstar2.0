@@ -5,6 +5,7 @@ import express, {
 } from 'express';
 import {GoogleGenAI, Type} from '@google/genai';
 import dotenv from 'dotenv';
+import {readFile} from 'node:fs/promises';
 import path from 'path';
 
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
@@ -31,6 +32,40 @@ type BatchPricesQuery = {
 
 type SpyHistoryQuery = {
   range?: string;
+};
+
+type IbkrPortfolioResponse = {
+  syncedAt: string;
+  source: 'ibkr-flex';
+  nav: {
+    startingValue: number;
+    endingValue: number;
+    depositsWithdrawals: number;
+    twr: number;
+    markToMarket: number;
+    fromDate: string | null;
+    toDate: string | null;
+  };
+  cash: {
+    startingCash: number;
+    endingCash: number;
+    endingSettledCash: number;
+    depositsWithdrawals: number;
+    dividends: number;
+    netTradesSales: number;
+    netTradesPurchases: number;
+  };
+  positions: Array<{
+    symbol: string;
+    quantity: number;
+    costBasisMoney: number;
+    markPrice: number;
+    positionValue: number;
+    unrealizedPnL: number;
+    reportDate: string | null;
+    currency: string;
+    assetClass: string;
+  }>;
 };
 
 type FinnhubNewsItem = {
@@ -257,6 +292,19 @@ function registerApiRoutes(app: Express): void {
     }
   });
 
+  app.get('/api/portfolio/ibkr', async (_req: Request, res: Response) => {
+    try {
+      const snapshot = await loadIbkrPortfolioSnapshot();
+      if (!snapshot) {
+        return res.status(404).json({error: 'IBKR portfolio snapshot not found'});
+      }
+      return res.json(snapshot);
+    } catch (error) {
+      console.error('IBKR portfolio load error:', error);
+      return res.status(500).json({error: 'Failed to load IBKR portfolio snapshot'});
+    }
+  });
+
   app.get('/api/news/market', async (_req: Request, res: Response) => {
     const finnhubKey = process.env.VITE_FINNHUB_KEY;
     if (!finnhubKey) {
@@ -477,6 +525,29 @@ const YAHOO_HEADERS: HeadersInit = {
   Accept: '*/*',
   'Accept-Language': 'en-US,en;q=0.9',
 };
+
+const IBKR_PORTFOLIO_PATH = path.resolve(
+  process.cwd(),
+  'data/ibkr-portfolio.json',
+);
+
+async function loadIbkrPortfolioSnapshot(): Promise<IbkrPortfolioResponse | null> {
+  try {
+    const raw = await readFile(IBKR_PORTFOLIO_PATH, 'utf8');
+    return JSON.parse(raw) as IbkrPortfolioResponse;
+  } catch (error: unknown) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as {code: string}).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+}
 
 export async function createApp(): Promise<Express> {
   const app = express();

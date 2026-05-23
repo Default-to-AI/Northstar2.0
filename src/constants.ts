@@ -1,6 +1,6 @@
 import { Position, InvestorProfile, WatchlistItem } from "./types";
 
-export const SEED_POSITIONS: Position[] = [
+export const FALLBACK_SEED_POSITIONS: Position[] = [
   { id: 'p1', ticker: 'QQQ', shares: 69.2812, avgCost: 597.405, currentPrice: 485.20, sector: 'Technology', thesis: "Core tech exposure" },
   { id: 'p2', ticker: 'GOOG', shares: 36, avgCost: 288.793, currentPrice: 178.45, sector: 'Communication Services', thesis: "AI and search dominance" },
   { id: 'p3', ticker: 'META', shares: 22, avgCost: 606.367, currentPrice: 472.30, sector: 'Communication Services', thesis: "Social graph and AI infrastructure" },
@@ -52,6 +52,8 @@ export const SEED_WATCHLIST: WatchlistItem[] = [
     createdAt: new Date().toISOString()
   }
 ];
+
+export const SEED_POSITIONS: Position[] = FALLBACK_SEED_POSITIONS;
 
 export const DEFAULT_PROFILE: InvestorProfile = {
   activeCapital: 500000,

@@ -64,7 +64,7 @@ function formatFullDate(unixSeconds: number, isLast: boolean): string {
 }
 
 export default function Dashboard() {
-  const { positions, metrics, cash, setCash, deletePosition, updatePosition, setPositions } = usePortfolioData();
+  const { positions, metrics, cash, setCash, deletePosition, updatePosition, setPositions, ibkrPortfolio, isIbkrPortfolioUsable } = usePortfolioData();
   const { profile } = useInvestorProfile();
   const [newsMode, setNewsMode] = useState<'holdings' | 'market'>('holdings');
   const [isEditingCash, setIsEditingCash] = useState(false);
@@ -312,9 +312,13 @@ export default function Dashboard() {
     return ((last - first) / first) * 100;
   })();
 
-  const portfolioReturnPct = metrics.totalCostBasis > 0
-    ? metrics.pnlPercentage
-    : 0;
+  const ibkrTwr = isIbkrPortfolioUsable && ibkrPortfolio ? ibkrPortfolio.nav.twr : null;
+
+  const portfolioReturnPct = ibkrTwr ?? (metrics.totalCostBasis > 0 ? metrics.pnlPercentage : 0);
+
+  const portfolioReturnLabel = ibkrTwr !== null
+    ? 'IBKR TWR'
+    : 'lifetime';
 
   const alphaPct = spyReturnPct !== null
     ? portfolioReturnPct - spyReturnPct
@@ -394,7 +398,7 @@ export default function Dashboard() {
               <div className="flex flex-col gap-0.5">
                 <div className="flex gap-2">
                   <span className="text-muted-foreground">SPY: {pnlLabel(spyReturnPct)} ({timeframeLabel})</span>
-                  <span className="text-muted-foreground">PF: {pnlLabel(portfolioReturnPct)} (lifetime)</span>
+                  <span className="text-muted-foreground">PF: {pnlLabel(portfolioReturnPct)} ({portfolioReturnLabel})</span>
                 </div>
                 <span className="text-primary font-bold">ALPHA: {pnlLabel(alphaPct)}</span>
               </div>

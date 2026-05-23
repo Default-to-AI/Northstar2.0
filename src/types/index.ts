@@ -9,7 +9,8 @@ export type Sector =
   | 'Consumer Staples'
   | 'Utilities'
   | 'Real Estate'
-  | 'Materials';
+  | 'Materials'
+  | 'Other';
 
 export type ThesisHealth = 'GREEN' | 'YELLOW' | 'RED' | 'NONE';
 
