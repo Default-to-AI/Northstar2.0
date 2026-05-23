@@ -1,7 +1,10 @@
 import {mkdir, writeFile} from 'node:fs/promises';
+import {writeFileSync as fsWriteSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {XMLParser} from 'fast-xml-parser';
+import dotenv from 'dotenv';
+dotenv.config();
 
 type FlexStatementResponse = {
   FlexStatementResponse?: {
@@ -155,11 +158,19 @@ function parseFlexPayload(xml: string): FlexStatementResponse['FlexStatementResp
 
 function throwIfRateLimited(xml: string): void {
   const payload = parseFlexPayload(xml);
-  const errorCode = payload?.ErrorCode?.trim();
-  const message = payload?.ErrorMessage?.trim() ?? '';
+
+  // Safe coercion — ErrorCode/ErrorMessage may be missing, number, or null
+  const raw = payload?.ErrorCode ?? '';
+  const errorCode = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+  const rawMsg = payload?.ErrorMessage ?? '';
+  const message = typeof rawMsg === 'string' ? rawMsg.trim() : '';
 
   if (errorCode === '1018' || message.includes('1018')) {
     throw new SyncError(`IBKR rate-limited request (1018): ${message || 'no message'}`, 'RATE_LIMITED_1018', true);
+  }
+
+  if (errorCode) {
+    console.warn('[IBKR Flex] non-1018 error code:', errorCode, message ? `| ${message}` : '');
   }
 }
 
@@ -279,74 +290,153 @@ export function parseStatement(xml: string): IbkrPortfolioSnapshot {
   const data = parser.parse(xml) as Record<string, unknown>;
   const root = (data.FlexQueryResponse as Record<string, unknown> | undefined) ?? data;
   const flexStatements = root.FlexStatements as Record<string, unknown> | undefined;
-  const flexStatement = flexStatements?.FlexStatement as Record<string, unknown> | undefined;
+  const flexStatementsRaw = flexStatements?.FlexStatement;
 
-  if (!flexStatement) {
+  // Normalise to array — the API returns one FlexStatement per sub-account
+  const statements: Record<string, unknown>[] = Array.isArray(flexStatementsRaw)
+    ? flexStatementsRaw
+    : flexStatementsRaw
+      ? [flexStatementsRaw]
+      : [];
+
+  if (statements.length === 0) {
     throw new SyncError('Missing FlexStatements.FlexStatement payload', 'SCHEMA_ERROR', false);
   }
 
-  const changeInNav = flexStatement.ChangeInNAV as Record<string, unknown> | undefined;
-  if (!changeInNav) {
-    throw new SyncError('Missing FlexStatement.ChangeInNAV payload', 'SCHEMA_ERROR', false);
+  // --- Aggregate NAV across all statements ---
+  let totalStarting = 0, totalEnding = 0, totalMarkToMarket = 0, totalDeposits = 0;
+  let fromDate: string | null = null, toDate: string | null = null;
+  let twrSum = 0, twrWeightSum = 0;  // weighted-average TWR across statements
+
+  for (const stmt of statements) {
+    const nav = stmt.ChangeInNAV as Record<string, unknown> | undefined;
+    if (!nav) continue;
+
+    totalStarting   += parseNumber(nav.startingValue);
+    totalEnding     += parseNumber(nav.endingValue);
+    totalMarkToMarket += parseNumber(nav.mtm ?? nav.markToMarket);
+    totalDeposits   += parseNumber(nav.depositsWithdrawals);
+
+    const d = typeof nav.fromDate === 'string' ? nav.fromDate : null;
+    if (d) fromDate = fromDate ?? d;
+    const e = typeof nav.toDate === 'string' ? nav.toDate : null;
+    if (e) toDate = e ?? toDate;
+
+    const endVal = parseNumber(nav.endingValue);
+    const twrVal = parseNumber(nav.twr ?? nav.timeWeightedReturn);
+    if (endVal > 0 && twrVal !== 0) {
+      twrSum += twrVal * endVal;
+      twrWeightSum += endVal;
+    }
   }
 
-  const openPositionsNode = flexStatement.OpenPositions as Record<string, unknown> | undefined;
-  const openPositions = asArray(
-    (openPositionsNode?.OpenPosition as Record<string, unknown> | Record<string, unknown>[] | undefined) ??
-      (flexStatement.OpenPosition as Record<string, unknown> | Record<string, unknown>[] | undefined),
-  );
+  const twr = twrWeightSum > 0 ? twrSum / twrWeightSum : 0;
 
-  const cashReportNode = flexStatement.CashReport as Record<string, unknown> | undefined;
-  const cashReports = asArray(
-    (cashReportNode?.CashReportCurrency as
-      | Record<string, unknown>
-      | Record<string, unknown>[]
-      | undefined) ??
-      (flexStatement.CashReport as Record<string, unknown> | Record<string, unknown>[] | undefined),
-  );
-  const cashReport = cashReports[cashReports.length - 1];
-
-  if (!cashReport) {
-    throw new SyncError('Missing FlexStatement.CashReport payload', 'SCHEMA_ERROR', false);
-  }
-
-  const nav: ParsedNav = {
-    startingValue: parseNumber(changeInNav.startingValue),
-    endingValue: parseNumber(changeInNav.endingValue),
-    depositsWithdrawals: parseNumber(changeInNav.depositsWithdrawals),
-    twr: parseNumber(changeInNav.twr ?? changeInNav.timeWeightedReturn),
-    markToMarket: parseNumber(changeInNav.mtm ?? changeInNav.markToMarket),
-    fromDate: typeof changeInNav.fromDate === 'string' ? changeInNav.fromDate : null,
-    toDate: typeof changeInNav.toDate === 'string' ? changeInNav.toDate : null,
+  // --- Aggregate Cash (last CashReportCurrency entry per statement, summed) ---
+  let aggCash: ParsedCash = {
+    startingCash: 0, endingCash: 0, endingSettledCash: 0,
+    depositsWithdrawals: 0, dividends: 0,
+    netTradesSales: 0, netTradesPurchases: 0,
   };
 
-  const positions: ParsedPosition[] = openPositions.map((position) => ({
-    symbol: String(position.symbol ?? '').trim(),
-    quantity: parseNumber(position.position),
-    costBasisMoney: parseNumber(position.costBasisMoney),
-    markPrice: parseNumber(position.markPrice),
-    positionValue: parseNumber(position.positionValue),
-    unrealizedPnL: parseNumber(position.fifoPnlUnrealized ?? position.unrealizedPnl),
-    reportDate: typeof position.reportDate === 'string' ? position.reportDate : null,
-    currency: String(position.currency ?? 'USD'),
-    assetClass: String(position.assetCategory ?? 'Unknown'),
+  for (const stmt of statements) {
+    const cashNode = stmt.CashReport as Record<string, unknown> | undefined;
+    const cashReports = asArray(
+      (cashNode?.CashReportCurrency as
+        | Record<string, unknown>
+        | Record<string, unknown>[]
+        | undefined) ??
+        (stmt.CashReport as Record<string, unknown> | Record<string, unknown>[] | undefined),
+    );
+    const cashReport = cashReports[cashReports.length - 1];
+    if (!cashReport) continue;
+
+    aggCash = {
+      startingCash:        aggCash.startingCash        + parseNumber(cashReport.startingCash ?? 0),
+      endingCash:          aggCash.endingCash          + parseNumber(cashReport.endingCash ?? 0),
+      endingSettledCash:   aggCash.endingSettledCash   + parseNumber(cashReport.endingSettledCash ?? 0),
+      depositsWithdrawals: aggCash.depositsWithdrawals + parseNumber(cashReport.depositWithdrawals ?? cashReport.depositsWithdrawals ?? 0),
+      dividends:           aggCash.dividends           + parseNumber(cashReport.dividends ?? 0),
+      netTradesSales:      aggCash.netTradesSales      + parseNumber(cashReport.netTradesSales ?? 0),
+      netTradesPurchases:  aggCash.netTradesPurchases  + parseNumber(cashReport.netTradesPurchases ?? 0),
+    };
+  }
+
+  // --- Merge positions by ticker symbol ---
+  type AggPos = {
+    symbol: string; quantity: number; costBasisMoney: number;
+    markPrice: number; positionValue: number; unrealizedPnL: number;
+    currency: string; assetClass: string;
+  };
+
+  const bySymbol = new Map<string, AggPos>();
+
+  for (const stmt of statements) {
+    const openPositionsNode = stmt.OpenPositions as Record<string, unknown> | undefined;
+    const rawPositions = asArray(
+      (openPositionsNode?.OpenPosition as Record<string, unknown> | Record<string, unknown>[] | undefined)
+        ?? (stmt.OpenPosition as Record<string, unknown> | Record<string, unknown>[] | undefined),
+    );
+
+    for (const p of rawPositions) {
+      const sym = String(p.symbol ?? '').trim().toUpperCase();
+      if (!sym) continue;
+
+      const qty    = parseNumber(p.position);
+      const cost   = parseNumber(p.costBasisMoney);
+      const mark   = parseNumber(p.markPrice);
+      const pv     = parseNumber(p.positionValue);
+      const pnl    = parseNumber(p.fifoPnlUnrealized ?? p.unrealizedPnl);
+      const curr   = String(p.currency ?? 'USD');
+      const asset  = String(p.assetCategory ?? 'Unknown');
+
+      const existing = bySymbol.get(sym);
+      if (!existing) {
+        bySymbol.set(sym, { symbol: sym, quantity: qty, costBasisMoney: cost,
+                            markPrice: mark, positionValue: pv, unrealizedPnL: pnl,
+                            currency: curr, assetClass: asset });
+      } else {
+        existing.quantity       += qty;
+        existing.costBasisMoney  += cost;
+        existing.positionValue   += pv;
+        existing.unrealizedPnL   += pnl;
+        // weighted-average mark price
+        const combinedVal = existing.positionValue + pv;
+        if (combinedVal > 0) {
+          existing.markPrice =
+            (existing.markPrice * existing.positionValue + mark * pv) / combinedVal;
+        } else {
+          existing.markPrice = (existing.markPrice + mark) / 2;
+        }
+      }
+    }
+  }
+
+  const positions: ParsedPosition[] = [...bySymbol.values()].map(p => ({
+    symbol:            p.symbol,
+    quantity:          p.quantity,
+    costBasisMoney:    p.costBasisMoney,
+    markPrice:         p.markPrice,
+    positionValue:     p.positionValue,
+    unrealizedPnL:     p.unrealizedPnL,
+    reportDate:        null as string | null,
+    currency:          p.currency,
+    assetClass:        p.assetClass,
   }));
 
-  const cash: ParsedCash = {
-    startingCash: parseNumber(cashReport.startingCash),
-    endingCash: parseNumber(cashReport.endingCash),
-    endingSettledCash: parseNumber(cashReport.endingSettledCash),
-    depositsWithdrawals: parseNumber(cashReport.depositWithdrawals ?? cashReport.depositsWithdrawals),
-    dividends: parseNumber(cashReport.dividends),
-    netTradesSales: parseNumber(cashReport.netTradesSales),
-    netTradesPurchases: parseNumber(cashReport.netTradesPurchases),
-  };
-
+  // --- Build snapshot ---
   const snapshot: IbkrPortfolioSnapshot = {
     syncedAt: new Date().toISOString(),
     source: 'ibkr-flex',
-    nav,
-    cash,
+    nav: {
+      startingValue:      totalStarting,
+      endingValue:        totalEnding,
+      depositsWithdrawals: totalDeposits,
+      twr,
+      markToMarket: totalMarkToMarket,
+      fromDate, toDate,
+    },
+    cash: aggCash,
     positions,
   };
 
@@ -354,13 +444,13 @@ export function parseStatement(xml: string): IbkrPortfolioSnapshot {
   if (validationErrors.length > 0) {
     throw new SyncError(
       `Parsed IBKR statement failed validation: ${validationErrors.join('; ')}`,
-      'VALIDATION_ERROR',
-      false,
+      'VALIDATION_ERROR', false,
     );
   }
 
   return snapshot;
 }
+
 
 async function retryWithBackoff<T>(operationName: string, operation: () => Promise<T>): Promise<T> {
   let lastError: unknown;
@@ -397,6 +487,7 @@ export async function runSync(): Promise<void> {
     getStatement(credentials.token, referenceCode),
   );
 
+  fsWriteSync('/tmp/ibkr-raw.xml', xmlStatement, 'utf8');
   const parsed = parseStatement(xmlStatement);
 
   await mkdir(path.dirname(OUTPUT_PATH), {recursive: true});

@@ -1,23 +1,211 @@
 {
-  "syncedAt": "2026-05-23T00:06:17.225Z",
+  "syncedAt": "2026-05-23T06:49:47.739Z",
   "source": "ibkr-flex",
   "nav": {
-    "startingValue": 0,
-    "endingValue": 0,
-    "depositsWithdrawals": 0,
-    "twr": 0,
-    "markToMarket": 0,
-    "fromDate": null,
-    "toDate": null
+    "startingValue": 115964.633545369,
+    "endingValue": 132216.600107457,
+    "depositsWithdrawals": -3547.732,
+    "twr": 17.451067737072798,
+    "markToMarket": 14723.62733849,
+    "fromDate": "01/01/2026",
+    "toDate": "22/05/2026"
   },
   "cash": {
-    "startingCash": 0,
-    "endingCash": 0,
-    "endingSettledCash": 0,
+    "startingCash": 30921.815287204,
+    "endingCash": 102.848044465,
+    "endingSettledCash": 102.848044465,
     "depositsWithdrawals": 0,
-    "dividends": 0,
-    "netTradesSales": 0,
-    "netTradesPurchases": 0
+    "dividends": 302.14000000000004,
+    "netTradesSales": 218917.179297,
+    "netTradesPurchases": -254821.25761214
   },
-  "positions": []
+  "positions": [
+    {
+      "symbol": "QQQ",
+      "quantity": 69.2812,
+      "costBasisMoney": 41388.88034,
+      "markPrice": 717.5400000000001,
+      "positionValue": 49712.03,
+      "unrealizedPnL": 8323.14966,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "AAPL",
+      "quantity": 7,
+      "costBasisMoney": 1883.53,
+      "markPrice": 308.82,
+      "positionValue": 2161.74,
+      "unrealizedPnL": 278.21,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "AMZN",
+      "quantity": 7.5993,
+      "costBasisMoney": 2034.960114,
+      "markPrice": 266.32,
+      "positionValue": 2023.85,
+      "unrealizedPnL": -11.110114,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "FICO",
+      "quantity": 2.09,
+      "costBasisMoney": 2291.3798,
+      "markPrice": 1239.91,
+      "positionValue": 2591.41,
+      "unrealizedPnL": 300.0302,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "GOOG",
+      "quantity": 36,
+      "costBasisMoney": 10396.53,
+      "markPrice": 379.38,
+      "positionValue": 13657.68,
+      "unrealizedPnL": 3261.15,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "HDV",
+      "quantity": 100,
+      "costBasisMoney": 2731.3,
+      "markPrice": 27.95,
+      "positionValue": 2795,
+      "unrealizedPnL": 63.7,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "IGV",
+      "quantity": 30,
+      "costBasisMoney": 2620.625,
+      "markPrice": 94.01,
+      "positionValue": 2820.3,
+      "unrealizedPnL": 199.675,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "JPM",
+      "quantity": 15,
+      "costBasisMoney": 4631.85,
+      "markPrice": 306.38,
+      "positionValue": 4595.7,
+      "unrealizedPnL": -36.15,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "META",
+      "quantity": 22,
+      "costBasisMoney": 13340.06,
+      "markPrice": 610.26,
+      "positionValue": 13425.72,
+      "unrealizedPnL": 85.66,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "MSFT",
+      "quantity": 14.9482,
+      "costBasisMoney": 6299.551803,
+      "markPrice": 418.57,
+      "positionValue": 6256.87,
+      "unrealizedPnL": -42.681803,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "NFLX",
+      "quantity": 81.305,
+      "costBasisMoney": 7432.217525,
+      "markPrice": 88.6,
+      "positionValue": 7203.62,
+      "unrealizedPnL": -228.597524,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "PLTR",
+      "quantity": 20,
+      "costBasisMoney": 2722.9,
+      "markPrice": 136.88,
+      "positionValue": 2737.6,
+      "unrealizedPnL": 14.7,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "RGTI",
+      "quantity": 22,
+      "costBasisMoney": 449.4004,
+      "markPrice": 26.42,
+      "positionValue": 581.24,
+      "unrealizedPnL": 131.8396,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "SPHD",
+      "quantity": 200,
+      "costBasisMoney": 9995.6,
+      "markPrice": 50.45,
+      "positionValue": 10090,
+      "unrealizedPnL": 94.4,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "SPYD",
+      "quantity": 100,
+      "costBasisMoney": 4692.8,
+      "markPrice": 47.71,
+      "positionValue": 4771,
+      "unrealizedPnL": 78.2,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "TSLA",
+      "quantity": 2,
+      "costBasisMoney": 854.116,
+      "markPrice": 426.01,
+      "positionValue": 852.02,
+      "unrealizedPnL": -2.096,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    },
+    {
+      "symbol": "UBER",
+      "quantity": 80,
+      "costBasisMoney": 5753.3,
+      "markPrice": 71.82,
+      "positionValue": 5745.6,
+      "unrealizedPnL": -7.7,
+      "reportDate": null,
+      "currency": "USD",
+      "assetClass": "STK"
+    }
+  ]
 }
