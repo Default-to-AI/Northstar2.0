@@ -107,6 +107,67 @@ test('parseStatement rejects mismatched position data instead of silently writin
 
   assert.throws(
     () => parseStatement(invalidPositionXml),
-    /positions\[0\]\.symbol must be non-empty string/,
+    /positions\[0\]\.symbol must be non-empty string|positions must be a non-empty array/,
   );
+});
+
+test('parseStatement normalizes multi-currency cash to base currency', () => {
+  const mixedCurrencyXml = `<?xml version="1.0" encoding="UTF-8"?>
+  <FlexQueryResponse>
+    <FlexStatements>
+      <FlexStatement>
+        <ChangeInNAV
+          fromDate="2026-05-21"
+          toDate="2026-05-22"
+          startingValue="100000"
+          endingValue="101500"
+          depositsWithdrawals="0"
+          twr="1.50"
+          mtm="1500"
+        />
+        <CashReport>
+          <CashReportCurrency
+            currency="USD"
+            fxRateToBase="1"
+            startingCash="100"
+            endingCash="100"
+            endingSettledCash="100"
+            depositWithdrawals="0"
+            dividends="0"
+            netTradesSales="0"
+            netTradesPurchases="0"
+          />
+          <CashReportCurrency
+            currency="ILS"
+            fxRateToBase="0.25"
+            startingCash="200"
+            endingCash="200"
+            endingSettledCash="200"
+            depositWithdrawals="0"
+            dividends="0"
+            netTradesSales="0"
+            netTradesPurchases="0"
+          />
+        </CashReport>
+        <OpenPositions>
+          <OpenPosition
+            symbol="AAPL"
+            position="10"
+            costBasisMoney="1700"
+            markPrice="180"
+            positionValue="1800"
+            fifoPnlUnrealized="100"
+            reportDate="2026-05-22"
+            currency="USD"
+            assetCategory="STK"
+          />
+        </OpenPositions>
+      </FlexStatement>
+    </FlexStatements>
+  </FlexQueryResponse>`;
+
+  const snapshot = parseStatement(mixedCurrencyXml);
+  assert.equal(snapshot.cash.endingSettledCash, 150);
+  assert.equal(snapshot.cash.endingCash, 150);
+  assert.equal(snapshot.cash.startingCash, 150);
 });

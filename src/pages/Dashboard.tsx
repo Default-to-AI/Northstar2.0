@@ -33,12 +33,15 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { usePortfolioData } from '@/src/hooks/usePortfolioData';
 import { useInvestorProfile } from '@/src/hooks/useInvestorProfile';
+import { useIBKRPortfolioAnalytics } from '@/src/hooks/useIBKRPortfolio';
+import { getPositionDisplayAssetClass, NORTHSTAR_PORTFOLIO_SYNCED_AT_KEY } from '@/src/hooks/portfolioHydration';
 import { Position } from '@/src/types';
 import { WatchlistDialog } from '@/src/components/WatchlistDialog';
 import { ThesisDrawer } from '@/src/components/ThesisDrawer';
 import { CsvImportDialog } from '@/src/components/CsvImportDialog';
 import { FearGreedGauge } from '@/src/components/FearGreedGauge';
 import { getFearGreedIndex } from '@/src/lib/fearGreedIndex';
+import DataSourceIndicator from '@/src/components/DataSourceIndicator';
 import { useQuery } from '@tanstack/react-query';
 
 // Chart Colors
@@ -62,6 +65,18 @@ function formatFullDate(unixSeconds: number, isLast: boolean): string {
   const base = d.toLocaleDateString('en-US', opts);
   return isLast ? `${base} (latest)` : base;
 }
+
+function parseBrokerDateTime(value: string | null | undefined): number {
+  if (!value) return 0;
+  const [datePart, timePart] = value.split(';');
+  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(datePart.trim());
+  if (!match) return 0;
+  const [, day, month, year] = match;
+  const time = timePart?.trim() || '00:00:00';
+  const parsed = new Date(`${year}-${month}-${day}T${time}Z`).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 
 export default function Dashboard() {
   const { positions, metrics, cash, setCash, deletePosition, updatePosition, setPositions, ibkrPortfolio, isIbkrPortfolioUsable } = usePortfolioData();
@@ -207,122 +222,25 @@ export default function Dashboard() {
   const [thesisDrawerOpen, setThesisDrawerOpen] = useState(false);
   const [activePosition, setActivePosition] = useState<Position | null>(null);
 
-  // ── SPY Historical Data ──────────────────────────────────────────
-  const { data: spyHistoryRaw, isLoading: spyLoading } = useQuery({
-    queryKey: ['spy-history', chartTimeframe],
-    queryFn: async () => {
-      const res = await fetch(`/api/stock/spy-history?range=${chartTimeframe}`);
-      if (!res.ok) throw new Error('Failed to fetch SPY history');
-      return res.json() as Promise<{
-        data: Array<{ timestamp: number; close: number }>;
-        timeframe: string;
-      }>;
-    },
-    refetchInterval: 300000, // 5 minutes
-    staleTime: 60000,
-  });
-
-  // ── Compute cumulative returns ───────────────────────────────────
-  const cumulativeReturnData = (() => {
-    if (!spyHistoryRaw?.data || spyHistoryRaw.data.length < 2) {
-      // Fallback while loading: return empty placeholder
-      return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
-    }
-
-    const raw = spyHistoryRaw.data;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed
-
-    // Filter data points based on timeframe
-    let filtered: typeof raw;
-    if (chartTimeframe === 'ytd') {
-      const jan1 = new Date(currentYear, 0, 1).getTime() / 1000;
-      filtered = raw.filter((d) => d.timestamp >= jan1);
-    } else if (chartTimeframe === 'mtd') {
-      const monthStart = new Date(currentYear, currentMonth, 1).getTime() / 1000;
-      filtered = raw.filter((d) => d.timestamp >= monthStart);
-    } else {
-      filtered = raw; // 1y — full data from server
-    }
-
-    if (filtered.length < 2) {
-      // Not enough data points in range — fallback to last N days of raw data
-      const slice = raw.slice(-Math.min(raw.length, 30));
-      if (slice.length < 2) return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
-      filtered = slice;
-    }
-
-    const baselinePrice = filtered[0].close;
-    if (!baselinePrice || baselinePrice <= 0) {
-      return [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...' }];
-    }
-
-    // SPY cumulative return % for each day
-    const portfolioReturnPct = metrics.totalCostBasis > 0
-      ? metrics.pnlPercentage
-      : 0;
-
-    const spyDataPoints = filtered.map((d) => {
-      const spyReturn = ((d.close - baselinePrice) / baselinePrice) * 100;
-      return {
-        date: formatTimestamp(d.timestamp),
-        portfolio: portfolioReturnPct, // Same current value for all points
-        spy: Math.round(spyReturn * 100) / 100,
-        fullDate: formatFullDate(d.timestamp, chartTimeframe === filtered[filtered.length - 1].timestamp),
-      };
-    });
-
-    // Overwrite first portfolio point to 0 (start of period)
-    if (spyDataPoints.length > 0) {
-      spyDataPoints[0] = { ...spyDataPoints[0], portfolio: 0 };
-    }
-
-    return spyDataPoints;
-  })();
+  // ── Broker-driven benchmark analytics ────────────────────────────
+  const { data: benchmarkAnalytics, isLoading: spyLoading } = useIBKRPortfolioAnalytics(chartTimeframe, ibkrPortfolio?.syncedAt ?? '');
+  const cumulativeReturnData = benchmarkAnalytics?.series?.length
+    ? benchmarkAnalytics.series
+    : [{ date: '...', portfolio: 0, spy: 0, fullDate: 'Loading...', portfolioValue: 0, spyValue: 0 }];
 
   // ── Timeframe label ──────────────────────────────────────────────
   const timeframeLabel = chartTimeframe === 'ytd' ? 'YTD' : chartTimeframe === 'mtd' ? 'MTD' : '1Y';
 
   // ── Compute VS SPY / Alpha KPIs ──────────────────────────────────
-  const spyReturnPct = (() => {
-    if (!spyHistoryRaw?.data || spyHistoryRaw.data.length < 2) return null;
-    const raw = spyHistoryRaw.data;
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-    let filtered: typeof raw;
-    if (chartTimeframe === 'ytd') {
-      const jan1 = new Date(currentYear, 0, 1).getTime() / 1000;
-      filtered = raw.filter((d) => d.timestamp >= jan1);
-    } else if (chartTimeframe === 'mtd') {
-      const monthStart = new Date(currentYear, currentMonth, 1).getTime() / 1000;
-      filtered = raw.filter((d) => d.timestamp >= monthStart);
-    } else {
-      filtered = raw;
-    }
-    if (filtered.length < 2) {
-      const slice = raw.slice(-Math.min(raw.length, 30));
-      if (slice.length < 2) return null;
-      filtered = slice;
-    }
-    const first = filtered[0].close;
-    const last = filtered[filtered.length - 1].close;
-    if (!first || first <= 0 || !last || last <= 0) return null;
-    return ((last - first) / first) * 100;
-  })();
+  const spyReturnPct = benchmarkAnalytics?.metrics.spyReturnPct ?? null;
+  const portfolioReturnPct = benchmarkAnalytics?.metrics.portfolioReturnPct
+    ?? (isIbkrPortfolioUsable && ibkrPortfolio ? ibkrPortfolio.nav.twr : metrics.totalCostBasis > 0 ? metrics.pnlPercentage : 0);
 
-  const ibkrTwr = isIbkrPortfolioUsable && ibkrPortfolio ? ibkrPortfolio.nav.twr : null;
+  const portfolioReturnLabel = benchmarkAnalytics?.metrics.startDate
+    ? `since ${benchmarkAnalytics.metrics.startDate}`
+    : (isIbkrPortfolioUsable && ibkrPortfolio ? 'IBKR TWR' : 'lifetime');
 
-  const portfolioReturnPct = ibkrTwr ?? (metrics.totalCostBasis > 0 ? metrics.pnlPercentage : 0);
-
-  const portfolioReturnLabel = ibkrTwr !== null
-    ? 'IBKR TWR'
-    : 'lifetime';
-
-  const alphaPct = spyReturnPct !== null
-    ? portfolioReturnPct - spyReturnPct
-    : null;
+  const alphaPct = benchmarkAnalytics?.metrics.alphaPct ?? (spyReturnPct !== null ? portfolioReturnPct - spyReturnPct : null);
 
   const pnlLabel = (val: number | null): string => {
     if (val === null) return '...';
@@ -330,10 +248,10 @@ export default function Dashboard() {
   };
 
   // ── Last data point for chart button labels ──────────────────────
-  const lastSpyReturn = cumulativeReturnData.length > 1
+  const lastSpyReturn = cumulativeReturnData.length > 0
     ? cumulativeReturnData[cumulativeReturnData.length - 1].spy
     : 0;
-  const lastPortfolioReturn = cumulativeReturnData.length > 1
+  const lastPortfolioReturn = cumulativeReturnData.length > 0
     ? cumulativeReturnData[cumulativeReturnData.length - 1].portfolio
     : 0;
 
@@ -341,10 +259,15 @@ export default function Dashboard() {
   const sectorData: { name: string, value: number }[] = Object.entries(
     positions.reduce((acc, p) => {
       const value = p.shares * (p.currentPrice || p.avgCost);
-      acc[p.sector] = (acc[p.sector] || 0) + value;
+      const label = getPositionDisplayAssetClass(p);
+      acc[label] = (acc[label] || 0) + value;
       return acc;
     }, {} as Record<string, number>)
   ).map(([name, value]) => ({ name, value: value as number }));
+
+  const recentTrades = [...(ibkrPortfolio?.trades ?? [])]
+    .sort((a, b) => parseBrokerDateTime(b.dateTime ?? b.tradeDate) - parseBrokerDateTime(a.dateTime ?? a.tradeDate))
+    .slice(0, 12);
 
   const concentrationData = [...positions]
     .sort((a, b) => (b.shares * (b.currentPrice || b.avgCost)) - (a.shares * (a.currentPrice || a.avgCost)))
@@ -361,18 +284,55 @@ export default function Dashboard() {
   const formatCurrency = (val: number) => 
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
   
-  const formatCompact = (val: number) => 
+  const formatCompact = (val: number) =>
     new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(val);
+
+  const todaysPnL = isIbkrPortfolioUsable && ibkrPortfolio
+    ? ibkrPortfolio.nav.markToMarket
+    : metrics.totalPnL;
+  const todaysPnLBase = isIbkrPortfolioUsable && ibkrPortfolio
+    ? ibkrPortfolio.nav.endingValue - ibkrPortfolio.nav.markToMarket
+    : metrics.totalValue - metrics.totalPnL;
+  const todaysPnLPct = todaysPnLBase > 0 ? (todaysPnL / todaysPnLBase) * 100 : 0;
+
+  // ── Data source indicator ──────────────────────────────────────────
+  const dataSource: 'ibkr' | 'seed' = isIbkrPortfolioUsable ? 'ibkr' : 'seed';
+
+  const formattedTime = (() => {
+    if (dataSource === 'ibkr') {
+      const synced =
+        ibkrPortfolio?.syncedAt ?? localStorage.getItem(NORTHSTAR_PORTFOLIO_SYNCED_AT_KEY);
+      if (synced) {
+        const d = new Date(synced);
+        return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+      }
+    }
+    const now = new Date();
+    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  })();
 
   return (
     <div className="p-4 space-y-4 max-w-[1600px] mx-auto">
+      {/* Dashboard Header */}
+      <div style={{ marginBottom: 4 }}>
+        <span style={{ color: '#C9A84C', fontFamily: 'JetBrains Mono, monospace', fontSize: 14, fontWeight: 'bold', letterSpacing: 2, textTransform: 'uppercase' }}>
+          Dashboard
+        </span>
+        <DataSourceIndicator mode={dataSource} timestamp={formattedTime} />
+      </div>
+
       {/* Top Summary */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4 xl:auto-rows-[168px]">
         {[
+          /* TOTAL VALUE card */
           {
             label: 'TOTAL VALUE',
             value: formatCurrency(metrics.totalValue),
-            subline: <span className="text-primary">+$1,243 TODAY / +0.97%</span>,
+            subline: (
+              <span className={todaysPnL >= 0 ? 'text-primary' : 'text-negative'}>
+                {todaysPnL >= 0 ? '+' : ''}{formatCurrency(todaysPnL)} TODAY / {todaysPnL >= 0 ? '+' : ''}{todaysPnLPct.toFixed(2)}%
+              </span>
+            ),
             className: 'xl:col-span-2 xl:row-start-1',
           },
           {
@@ -497,11 +457,16 @@ export default function Dashboard() {
       {/* Holdings Table */}
       <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
         <div className="p-2 px-4 border-b border-border flex items-center justify-between">
-          <h2 className="label-text">Core Holdings</h2>
+          <div>
+            <h2 className="label-text">Broker Holdings</h2>
+            <p className="text-[11px] font-mono text-muted-foreground mt-1">
+              Built from current IBKR snapshot. Live rows use broker quantity, cost basis, price, exchange, and report date.
+            </p>
+          </div>
           <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              size="sm" 
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setCsvImportOpen(true)}
               className="rounded-none bg-muted/10 text-muted-foreground hover:text-foreground border-border h-7 text-[11px] font-bold px-3 py-1"
             >
@@ -512,157 +477,48 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
-        <div className="">
-          <Table className="text-[13px]">
+        <div>
+          <Table className="text-[12px]">
             <TableHeader className="bg-[#0d0d14] sticky top-0 z-10">
               <TableRow className="border-border hover:bg-transparent">
-                <TableHead className="w-[100px] label-text h-8 py-0">Ticker</TableHead>
-                <TableHead className="text-right label-text h-8 py-0">Shares</TableHead>
+                <TableHead className="w-[120px] label-text h-8 py-0">Ticker</TableHead>
+                <TableHead className="label-text h-8 py-0">Name</TableHead>
+                <TableHead className="label-text h-8 py-0">Class</TableHead>
+                <TableHead className="text-right label-text h-8 py-0">Qty</TableHead>
                 <TableHead className="text-right label-text h-8 py-0">Avg Cost</TableHead>
                 <TableHead className="text-right label-text h-8 py-0">Price</TableHead>
                 <TableHead className="text-right label-text h-8 py-0">Value</TableHead>
                 <TableHead className="text-right label-text h-8 py-0">P&L</TableHead>
-                <TableHead className="text-right label-text h-8 py-0">Weight</TableHead>
-                <TableHead className="text-right label-text h-8 py-0">Stop</TableHead>
-                <TableHead className="label-text h-8 py-0">Sector</TableHead>
-                <TableHead className="label-text h-8 py-0">Thesis</TableHead>
-                <TableHead className="w-[100px] h-8 py-0"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className="font-mono">
               {positions.map((pos) => {
-                const value = pos.shares * (pos.currentPrice || pos.avgCost);
-                const pnl = value - (pos.shares * pos.avgCost);
-                const pnlPerc = (pnl / (pos.shares * pos.avgCost)) * 100;
-                const weight = metrics.totalValue > 0 ? (value / metrics.totalValue) * 100 : 0;
-                
-                const suggestedStop = pos.avgCost * (1 - (profile.defaultStopLoss / 100));
-                const effectiveStop = pos.manualStop ?? suggestedStop;
                 const currentPrice = pos.currentPrice || pos.avgCost;
-                const isNearStop = currentPrice > effectiveStop && currentPrice <= effectiveStop * 1.05;
-                const isBelowStop = currentPrice <= effectiveStop;
-
-                const handleThesisBlur = () => {
-                  if (editingThesis === pos.id) {
-                    updatePosition({ ...pos, thesis: tempThesis });
-                    setEditingThesis(null);
-                  }
-                };
-
-                const handleStopBlur = () => {
-                  if (editingStop === pos.id) {
-                    const price = parseFloat(tempStop);
-                    updatePosition({ ...pos, manualStop: isNaN(price) ? undefined : price });
-                    setEditingStop(null);
-                  }
-                };
+                const value = pos.shares * currentPrice;
+                const cost = pos.shares * pos.avgCost;
+                const pnl = value - cost;
+                const pnlPerc = cost > 0 ? (pnl / cost) * 100 : 0;
+                const classification = getPositionDisplayAssetClass(pos);
 
                 return (
                   <TableRow key={pos.id} className="border-border hover:bg-muted/30 group">
                     <TableCell className="py-2 font-bold">
                       <div className="flex items-center gap-2">
-                        <div className={`w-1.5 h-1.5 rounded-full ${
-                          pos.thesisData?.health === 'GREEN' ? 'bg-green-500' : 
-                          pos.thesisData?.health === 'YELLOW' ? 'bg-amber-500' : 
-                          pos.thesisData?.health === 'RED' ? 'bg-red-500' : 
-                          'bg-[#444]'
-                        }`} />
-                        {pos.ticker}
+                        <div className={`w-1.5 h-1.5 rounded-full ${pos.brokerSource ? 'bg-green-500' : 'bg-muted-foreground'}`} />
+                        <span>{pos.ticker}</span>
                       </div>
                     </TableCell>
-                    <TableCell className="py-2 text-right">{pos.shares.toFixed(2)}</TableCell>
-                    <TableCell className="py-3 text-right text-muted-foreground">{pos.avgCost.toFixed(2)}</TableCell>
+                    <TableCell className="py-2 max-w-[220px]">
+                      <div className="truncate text-foreground">{pos.name || pos.ticker}</div>
+                    </TableCell>
+                    <TableCell className="py-2 uppercase text-[10px] opacity-70">{classification || pos.sector}</TableCell>
+                    <TableCell className="py-2 text-right">{pos.shares.toFixed(4).replace(/\.?0+$/, '')}</TableCell>
+                    <TableCell className="py-2 text-right text-muted-foreground">{pos.avgCost.toFixed(2)}</TableCell>
                     <TableCell className="py-2 text-right">{currentPrice.toFixed(2)}</TableCell>
                     <TableCell className="py-2 text-right font-bold text-foreground">{formatCurrency(value)}</TableCell>
                     <TableCell className={`py-2 text-right ${pnl >= 0 ? 'text-positive' : 'text-negative'}`}>
-                      {pnl >= 0 ? '+' : ''}{pnlPerc.toFixed(1)}%
-                    </TableCell>
-                    <TableCell className="py-2 text-right text-muted-foreground/80">{weight.toFixed(1)}%</TableCell>
-                    <TableCell className={`py-2 text-right ${
-                      isBelowStop ? 'text-negative bg-negative/20 border-negative/30 border' : 
-                      isNearStop ? 'text-primary bg-primary/20 border-primary/30 border' : 
-                      'border-transparent'
-                    }`}>
-                      <div className="flex items-center justify-end gap-1">
-                        {isBelowStop && <AlertTriangle className="w-3 h-3 text-red-500" />}
-                        {editingStop === pos.id ? (
-                          <Input 
-                            value={tempStop}
-                            onChange={(e) => setTempStop(e.target.value)}
-                            onBlur={handleStopBlur}
-                            onKeyDown={(e) => e.key === 'Enter' && handleStopBlur()}
-                            autoFocus
-                            className="h-5 w-16 text-[11px] rounded-none border-primary bg-background p-1 font-mono text-right"
-                          />
-                        ) : (
-                          <span 
-                            onClick={() => {
-                              setEditingStop(pos.id);
-                              setTempStop(pos.manualStop?.toString() || "");
-                            }}
-                            className={`cursor-pointer font-bold transition-all hover:scale-105 ${pos.manualStop ? 'text-red-500 underline decoration-dotted' : 'text-muted-foreground/50'}`}
-                            title={pos.manualStop ? "Manual Stop (Order Set)" : "Suggested Stop (Auto)"}
-                          >
-                            {effectiveStop.toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-2 uppercase text-[10px] opacity-60">{pos.sector}</TableCell>
-                    <TableCell className="py-2">
-                      {editingThesis === pos.id ? (
-                        <Input 
-                          value={tempThesis}
-                          onChange={(e) => setTempThesis(e.target.value)}
-                          onBlur={handleThesisBlur}
-                          onKeyDown={(e) => e.key === 'Enter' && handleThesisBlur()}
-                          autoFocus
-                          className="h-6 text-[11px] rounded-none border-primary bg-background p-1 font-mono"
-                        />
-                      ) : (
-                        <div 
-                          onClick={() => {
-                            setEditingThesis(pos.id);
-                            setTempThesis(pos.thesis || "");
-                          }}
-                          className={`cursor-pointer truncate max-w-[200px] ${!pos.thesis ? 'text-muted-foreground italic text-[11px]' : ''}`}
-                        >
-                          {pos.thesis || "Add thesis..."}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="py-2 text-right pr-4">
-                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button 
-                          className="text-muted-foreground hover:text-primary"
-                          title="View Thesis"
-                          onClick={() => {
-                            setActivePosition(pos);
-                            setThesisDrawerOpen(true);
-                          }}
-                        >
-                          <BookOpen className="w-3.5 h-3.5" />
-                        </button>
-                        <button 
-                          className="text-muted-foreground hover:text-primary"
-                          title="Add to Watchlist"
-                          onClick={() => {
-                            setPrefilledTicker(pos.ticker);
-                            setWatchlistDialogOpen(true);
-                          }}
-                        >
-                          <BookmarkPlus className="w-3.5 h-3.5" />
-                        </button>
-                        <button className="text-muted-foreground hover:text-primary">
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button 
-                          className="text-muted-foreground hover:text-negative"
-                          onClick={() => deletePosition(pos.id)}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      <div>{formatCurrency(pnl)}</div>
+                      <div className="text-[10px]">{pnl >= 0 ? '+' : ''}{pnlPerc.toFixed(1)}%</div>
                     </TableCell>
                   </TableRow>
                 );
@@ -672,12 +528,56 @@ export default function Dashboard() {
         </div>
       </Card>
 
+      {recentTrades.length > 0 && (
+        <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+          <div className="p-2 px-4 border-b border-border flex items-center justify-between">
+            <div>
+              <h2 className="label-text">Broker Trades · Last 12</h2>
+              <p className="text-[11px] font-mono text-muted-foreground mt-1">
+                Execution history from IBKR over trailing year. Use this to verify sizing, fills, commissions, and realized P&amp;L.
+              </p>
+            </div>
+            <Badge variant="outline" className="rounded-none border-border font-mono text-[10px]">
+              {ibkrPortfolio?.trades.length ?? 0} total trades
+            </Badge>
+          </div>
+          <Table className="text-[12px]">
+            <TableHeader className="bg-[#0d0d14] sticky top-0 z-10">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="label-text h-8 py-0">Date/Time</TableHead>
+                <TableHead className="label-text h-8 py-0">Ticker</TableHead>
+                <TableHead className="label-text h-8 py-0">Side</TableHead>
+                <TableHead className="text-right label-text h-8 py-0">Qty</TableHead>
+                <TableHead className="text-right label-text h-8 py-0">Price</TableHead>
+                <TableHead className="text-right label-text h-8 py-0">Net Cash</TableHead>
+                <TableHead className="text-right label-text h-8 py-0">Realized P/L</TableHead>
+                <TableHead className="label-text h-8 py-0">Order Ref</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody className="font-mono">
+              {recentTrades.map((trade) => (
+                <TableRow key={`${trade.tradeId}-${trade.transactionId}-${trade.symbol}`} className="border-border hover:bg-muted/30">
+                  <TableCell className="py-2 text-[10px] text-muted-foreground">{trade.dateTime || trade.tradeDate || '—'}</TableCell>
+                  <TableCell className="py-2 font-bold">{trade.symbol}</TableCell>
+                  <TableCell className={`py-2 ${trade.buySell === 'SELL' ? 'text-negative' : 'text-positive'}`}>{trade.buySell || trade.transactionType || '—'}</TableCell>
+                  <TableCell className="py-2 text-right">{trade.quantity.toFixed(4).replace(/\.?0+$/, '')}</TableCell>
+                  <TableCell className="py-2 text-right">{trade.tradePrice.toFixed(2)}</TableCell>
+                  <TableCell className={`py-2 text-right ${trade.netCash >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(trade.netCash)}</TableCell>
+                  <TableCell className={`py-2 text-right ${trade.realizedPnL >= 0 ? 'text-positive' : 'text-negative'}`}>{formatCurrency(trade.realizedPnL)}</TableCell>
+                  <TableCell className="py-2 text-[10px] text-muted-foreground truncate max-w-[180px]">{trade.orderReference || trade.ibOrderId || trade.transactionId || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
+
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Sector Distribution */}
         <Card className="rounded-none bg-background border-border terminal-border flex flex-col min-h-[220px]">
           <div className="p-2 px-3 border-b border-border bg-muted/10">
-            <h3 className="label-text">Sector Distribution</h3>
+            <h3 className="label-text">Asset Mix</h3>
           </div>
           <div className="flex-1 flex items-center p-3">
               <div className="w-[140px] h-[140px]">

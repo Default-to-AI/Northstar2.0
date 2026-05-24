@@ -9,6 +9,9 @@ import {readFile} from 'node:fs/promises';
 import path from 'path';
 
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
+import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
+import type {IBKRPortfolioSnapshot} from '../types/ibkr';
+import Database from 'better-sqlite3';
 
 dotenv.config();
 
@@ -32,40 +35,6 @@ type BatchPricesQuery = {
 
 type SpyHistoryQuery = {
   range?: string;
-};
-
-type IbkrPortfolioResponse = {
-  syncedAt: string;
-  source: 'ibkr-flex';
-  nav: {
-    startingValue: number;
-    endingValue: number;
-    depositsWithdrawals: number;
-    twr: number;
-    markToMarket: number;
-    fromDate: string | null;
-    toDate: string | null;
-  };
-  cash: {
-    startingCash: number;
-    endingCash: number;
-    endingSettledCash: number;
-    depositsWithdrawals: number;
-    dividends: number;
-    netTradesSales: number;
-    netTradesPurchases: number;
-  };
-  positions: Array<{
-    symbol: string;
-    quantity: number;
-    costBasisMoney: number;
-    markPrice: number;
-    positionValue: number;
-    unrealizedPnL: number;
-    reportDate: string | null;
-    currency: string;
-    assetClass: string;
-  }>;
 };
 
 type FinnhubNewsItem = {
@@ -292,6 +261,58 @@ function registerApiRoutes(app: Express): void {
     }
   });
 
+  app.get('/api/research/readiness', async (_req: Request, res: Response) => {
+    try {
+      const db = new Database(DB_PATH, { fileMustExist: false });
+      
+      // Check if table exists
+      const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'").get();
+      if (!tableCheck) {
+        db.close();
+        return res.json({ status: 'warning', message: 'Pipeline not initialized', sources: [] });
+      }
+
+      const stmt = db.prepare(`
+        SELECT pipeline_name, started_at, completed_at, status, error_message
+        FROM runs
+        ORDER BY completed_at DESC
+        LIMIT 1
+      `);
+      const row = stmt.get() as any;
+      db.close();
+
+      if (!row) {
+        return res.json({ status: 'warning', message: 'No pipeline runs found', sources: [] });
+      }
+
+      const completedAt = new Date(row.completed_at);
+      const now = new Date();
+      const diffHours = (now.getTime() - completedAt.getTime()) / (1000 * 60 * 60);
+
+      let status = 'fresh';
+      if (row.status !== 'success') {
+        status = 'error';
+      } else if (diffHours > 24) {
+        status = 'stale';
+      }
+
+      return res.json({
+        status,
+        sources: [
+          {
+            name: row.pipeline_name,
+            status,
+            timestamp: row.completed_at,
+            error_message: row.error_message,
+          }
+        ]
+      });
+    } catch (error) {
+      console.error('Readiness error:', error);
+      return res.status(500).json({ error: 'Failed to fetch readiness' });
+    }
+  });
+
   app.get('/api/portfolio/ibkr', async (_req: Request, res: Response) => {
     try {
       const snapshot = await loadIbkrPortfolioSnapshot();
@@ -304,6 +325,29 @@ function registerApiRoutes(app: Express): void {
       return res.status(500).json({error: 'Failed to load IBKR portfolio snapshot'});
     }
   });
+
+  app.get(
+    '/api/portfolio/ibkr/analytics',
+    async (
+      req: Request<Record<string, never>, unknown, unknown, SpyHistoryQuery>,
+      res: Response,
+    ) => {
+      try {
+        const snapshot = await loadIbkrPortfolioSnapshot();
+        if (!snapshot) {
+          return res.status(404).json({error: 'IBKR portfolio snapshot not found'});
+        }
+
+        const rawRange = req.query.range;
+        const range = rawRange === 'ytd' || rawRange === 'mtd' ? rawRange : '1y';
+        const analytics = await buildIbkrPortfolioAnalytics(snapshot, range);
+        return res.json(analytics);
+      } catch (error) {
+        console.error('IBKR portfolio analytics error:', error);
+        return res.status(500).json({error: 'Failed to build IBKR portfolio analytics'});
+      }
+    },
+  );
 
   app.get('/api/news/market', async (_req: Request, res: Response) => {
     const finnhubKey = process.env.VITE_FINNHUB_KEY;
@@ -531,10 +575,15 @@ const IBKR_PORTFOLIO_PATH = path.resolve(
   'data/ibkr-portfolio.json',
 );
 
-async function loadIbkrPortfolioSnapshot(): Promise<IbkrPortfolioResponse | null> {
+const DB_PATH = path.resolve(
+  process.cwd(),
+  'data/northstar.db',
+);
+
+async function loadIbkrPortfolioSnapshot(): Promise<IBKRPortfolioSnapshot | null> {
   try {
     const raw = await readFile(IBKR_PORTFOLIO_PATH, 'utf8');
-    return JSON.parse(raw) as IbkrPortfolioResponse;
+    return JSON.parse(raw) as IBKRPortfolioSnapshot;
   } catch (error: unknown) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error

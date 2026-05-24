@@ -9,6 +9,7 @@ import Archive from './pages/Archive';
 import Committee from './pages/Committee';
 import Scanner from './pages/Scanner';
 import { Badge } from '@/components/ui/badge';
+import PipelineReadinessIndicator from './components/PipelineReadinessIndicator';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -83,6 +84,7 @@ export default function App() {
             <header className="h-12 border-b border-border flex items-center justify-between px-6 bg-background sticky top-0 z-10 w-full shrink-0">
               <div className="flex items-center gap-4">
                 <span className="text-[11px] font-mono text-foreground font-bold uppercase tracking-tight">Active Session: PORTFOLIO_ALPHA_ONE</span>
+                <PipelineReadinessIndicator />
               </div>
               <div className="flex items-center gap-3">
                 {import.meta.env.VITE_FINNHUB_KEY && 

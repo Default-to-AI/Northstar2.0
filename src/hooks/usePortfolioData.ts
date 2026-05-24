@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
-import { FALLBACK_SEED_POSITIONS } from '../constants';
-import { fetchCurrentPrices } from '../lib/finnhub';
-import { Position, PortfolioMetrics } from '../types';
-import { useState, useEffect, useRef, type SetStateAction } from 'react';
-import { isIBKRPortfolioSnapshotUsable, useIBKRPortfolio } from './useIBKRPortfolio';
+import {useQuery} from '@tanstack/react-query';
+import {FALLBACK_SEED_POSITIONS} from '../constants';
+import {fetchCurrentPrices} from '../lib/finnhub';
+import {Position, PortfolioMetrics} from '../types';
+import {useState, useEffect, useRef, type SetStateAction} from 'react';
+import {isIBKRPortfolioSnapshotUsable, normalizeIbkrCashValue, useIBKRPortfolio} from './useIBKRPortfolio';
 import {
   applyUserPositionsUpdate,
   canPersistLocalPortfolio,
@@ -13,13 +13,27 @@ import {
   mapIbkrPositionsToPortfolioPositions,
   NORTHSTAR_CASH_KEY,
   NORTHSTAR_POSITIONS_KEY,
+  NORTHSTAR_PORTFOLIO_SOURCE_KEY,
   persistLocalPortfolioSource,
+  getLocalPortfolioSource,
 } from './portfolioHydration';
+
+export function getPortfolioDisplayCash(params: {
+  ibkrPortfolio: ReturnType<typeof normalizeIbkrCashValue> extends number ? Parameters<typeof normalizeIbkrCashValue>[0] : never;
+  isIbkrPortfolioUsable: boolean;
+  localCash: number;
+}): number {
+  const {ibkrPortfolio, isIbkrPortfolioUsable, localCash} = params;
+  return ibkrPortfolio && isIbkrPortfolioUsable
+    ? normalizeIbkrCashValue(ibkrPortfolio)
+    : localCash;
+}
 
 export function usePortfolioData() {
   const {data: ibkrPortfolio, isFetched: isIbkrFetched} = useIBKRPortfolio();
   const isIbkrPortfolioUsable = isIBKRPortfolioSnapshotUsable(ibkrPortfolio);
   const hasHydratedFromIbkr = useRef(false);
+  const lastHydratedSyncedAt = useRef<string | null>(null);
   const hadLocalSnapshotOnBoot = useRef(hadManualLocalSnapshotOnBoot());
 
   const [positions, setPositionsRaw] = useState<Position[]>(() => {
@@ -33,55 +47,69 @@ export function usePortfolioData() {
   });
 
   useEffect(() => {
-    if (
-      hasHydratedFromIbkr.current ||
-      !ibkrPortfolio ||
-      !isIbkrPortfolioUsable ||
-      hadLocalSnapshotOnBoot.current
-    ) {
+    if (!ibkrPortfolio || !isIbkrPortfolioUsable) {
       return;
     }
 
-    const mappedPositions = mapIbkrPositionsToPortfolioPositions(ibkrPortfolio);
-    setPositionsRaw(mappedPositions);
-
-    if (ibkrPortfolio.cash.endingSettledCash > 0) {
-      setCash(ibkrPortfolio.cash.endingSettledCash);
-    } else if (ibkrPortfolio.cash.endingCash > 0) {
-      setCash(ibkrPortfolio.cash.endingCash);
+    const syncedAt = ibkrPortfolio.syncedAt?.trim() || '';
+    if (hasHydratedFromIbkr.current && lastHydratedSyncedAt.current === syncedAt) {
+      return;
     }
 
-    persistLocalPortfolioSource('ibkr', ibkrPortfolio.syncedAt);
+    const currentSource = localStorage.getItem(NORTHSTAR_PORTFOLIO_SOURCE_KEY);
+    if (currentSource !== 'manual' && !hadLocalSnapshotOnBoot.current) {
+      const mappedPositions = mapIbkrPositionsToPortfolioPositions(ibkrPortfolio);
+      setPositionsRaw(mappedPositions);
+    }
+
+    const normalizedCash = normalizeIbkrCashValue(ibkrPortfolio);
+    setCash(normalizedCash);
+    localStorage.setItem(NORTHSTAR_CASH_KEY, normalizedCash.toString());
+
+    if (currentSource !== 'manual') {
+      persistLocalPortfolioSource('ibkr', syncedAt);
+    }
     hasHydratedFromIbkr.current = true;
+    lastHydratedSyncedAt.current = syncedAt;
   }, [ibkrPortfolio, isIbkrPortfolioUsable]);
 
-  const tickers = positions.map(p => p.ticker);
+  const nonBrokerTickers = positions.filter((position) => !position.brokerSource).map((position) => position.ticker);
 
-  const { data: prices, isLoading } = useQuery({
-    queryKey: ['prices', tickers.join(',')],
-    queryFn: () => fetchCurrentPrices(tickers),
+  const {data: prices, isLoading} = useQuery({
+    queryKey: ['prices', nonBrokerTickers.join(',')],
+    queryFn: () => fetchCurrentPrices(nonBrokerTickers),
+    enabled: nonBrokerTickers.length > 0,
     refetchInterval: 60000,
   });
 
-  const positionsWithPrices = positions.map(p => ({
-    ...p,
-    currentPrice: prices?.[p.ticker] ?? p.currentPrice ?? p.avgCost,
+  const positionsWithPrices = positions.map((position) => ({
+    ...position,
+    currentPrice: position.brokerSource
+      ? position.currentPrice ?? position.avgCost
+      : prices?.[position.ticker] ?? position.currentPrice ?? position.avgCost,
   }));
 
-  const metrics: PortfolioMetrics = positionsWithPrices.reduce((acc, p) => {
-    const value = p.shares * (p.currentPrice || p.avgCost);
-    const cost = p.shares * p.avgCost;
-    return {
-      totalValue: acc.totalValue + value,
-      totalCostBasis: acc.totalCostBasis + cost,
-      totalPnL: acc.totalPnL + (value - cost),
-      pnlPercentage: 0,
-      cash: 0,
-    };
-  }, { totalValue: 0, totalCostBasis: 0, totalPnL: 0, pnlPercentage: 0, cash: 0 });
+  const metrics: PortfolioMetrics = positionsWithPrices.reduce(
+    (acc, position) => {
+      const value = position.shares * (position.currentPrice || position.avgCost);
+      const cost = position.shares * position.avgCost;
+      return {
+        totalValue: acc.totalValue + value,
+        totalCostBasis: acc.totalCostBasis + cost,
+        totalPnL: acc.totalPnL + (value - cost),
+        pnlPercentage: 0,
+        cash: 0,
+      };
+    },
+    {totalValue: 0, totalCostBasis: 0, totalPnL: 0, pnlPercentage: 0, cash: 0},
+  );
 
-  metrics.cash = cash;
-  metrics.totalValue += cash;
+  const displayCash = ibkrPortfolio && isIbkrPortfolioUsable
+    ? normalizeIbkrCashValue(ibkrPortfolio)
+    : cash;
+
+  metrics.cash = displayCash;
+  metrics.totalValue += displayCash;
 
   metrics.pnlPercentage = metrics.totalCostBasis > 0
     ? (metrics.totalPnL / metrics.totalCostBasis) * 100
@@ -117,17 +145,17 @@ export function usePortfolioData() {
     localStorage.setItem(NORTHSTAR_CASH_KEY, cash.toString());
   }, [cash, ibkrPortfolio, isIbkrFetched, isIbkrPortfolioUsable]);
 
-  const addPosition = (p: Position) => {
+  const addPosition = (position: Position) => {
     markPortfolioSourceForUserEdit();
-    setPositionsRaw(prev => [...prev, p]);
+    setPositionsRaw((previous) => [...previous, position]);
   };
   const deletePosition = (id: string) => {
     markPortfolioSourceForUserEdit();
-    setPositionsRaw(prev => prev.filter(pos => pos.id !== id));
+    setPositionsRaw((previous) => previous.filter((position) => position.id !== id));
   };
   const updatePosition = (updated: Position) => {
     markPortfolioSourceForUserEdit();
-    setPositionsRaw(prev => prev.map(p => p.id === updated.id ? updated : p));
+    setPositionsRaw((previous) => previous.map((position) => (position.id === updated.id ? updated : position)));
   };
   const setCashFromUser = (nextCash: number) => {
     markPortfolioSourceForUserEdit();
@@ -147,7 +175,7 @@ export function usePortfolioData() {
   return {
     positions: positionsWithPrices,
     metrics,
-    cash,
+    cash: displayCash,
     setCash: setCashFromUser,
     isLoading,
     addPosition,
@@ -157,5 +185,6 @@ export function usePortfolioData() {
     resetToSeed,
     ibkrPortfolio,
     isIbkrPortfolioUsable,
+    getLocalPortfolioSource,
   };
 }

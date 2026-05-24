@@ -1,16 +1,4 @@
-export type Sector = 
-  | 'Technology' 
-  | 'Financials' 
-  | 'Consumer Discretionary' 
-  | 'Industrials' 
-  | 'Health Care' 
-  | 'Energy' 
-  | 'Communication Services'
-  | 'Consumer Staples'
-  | 'Utilities'
-  | 'Real Estate'
-  | 'Materials'
-  | 'Other';
+export type Sector = string;
 
 export type ThesisHealth = 'GREEN' | 'YELLOW' | 'RED' | 'NONE';
 
@@ -33,6 +21,20 @@ export interface Position {
   manualStop?: number;
   thesis?: string;
   thesisData?: Thesis;
+  name?: string;
+  assetClass?: string;
+  subCategory?: string;
+  listingExchange?: string;
+  issuerCountryCode?: string;
+  percentOfNav?: number;
+  reportDate?: string | null;
+  brokerSource?: boolean;
+  accountId?: string;
+  accountAlias?: string;
+  conid?: string;
+  cusip?: string;
+  isin?: string;
+  figi?: string;
 }
 
 export type Verdict = 'BUY' | 'ADD' | 'HOLD' | 'TRIM' | 'SELL' | 'WATCH';
@@ -54,7 +56,7 @@ export interface ArchiveSession {
   };
   outcome: Outcome;
   outcomeText: string;
-  fullTranscript: any;
+  fullTranscript: unknown;
 }
 
 export type WatchReason = 'POPULAR' | 'UNDERVALUED' | 'WAITING FOR ENTRY' | 'RESEARCHING';
@@ -88,12 +90,12 @@ export interface PortfolioMetrics {
 export interface InvestorProfile {
   activeCapital: number;
   totalNetWorth: number;
-  maxPositionSize: number; // percentage
-  minPositionSize: number; // dollar amount
-  cashFloor: number; // percentage
-  defaultStopLoss: number; // percentage
+  maxPositionSize: number;
+  minPositionSize: number;
+  cashFloor: number;
+  defaultStopLoss: number;
   vixThreshold: number;
-  positionSizeReduction: number; // percentage
+  positionSizeReduction: number;
   minConvictionScore: number;
   psychology: 'Aggressive Accumulator' | 'Conviction-Driven' | 'Defensive';
 }

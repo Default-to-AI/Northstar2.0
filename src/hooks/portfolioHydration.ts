@@ -1,6 +1,6 @@
-import { Position, Sector } from '../types';
-import type { SetStateAction } from 'react';
-import { IBKRPortfolio } from './useIBKRPortfolio';
+import {Position, Sector} from '../types';
+import type {SetStateAction} from 'react';
+import {IBKRPortfolio} from './useIBKRPortfolio';
 
 export const NORTHSTAR_POSITIONS_KEY = 'northstar_positions';
 export const NORTHSTAR_CASH_KEY = 'northstar_cash';
@@ -9,37 +9,91 @@ export const NORTHSTAR_PORTFOLIO_SYNCED_AT_KEY = 'northstar_portfolio_synced_at'
 
 export type LocalPortfolioSource = 'manual' | 'ibkr';
 
-function mapAssetClassToSector(assetClass: string): Sector {
-  const normalized = assetClass.toLowerCase();
+function titleCaseLabel(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
 
-  if (normalized.includes('technology')) return 'Technology';
-  if (normalized.includes('financial')) return 'Financials';
-  if (normalized.includes('consumer')) return 'Consumer Discretionary';
-  if (normalized.includes('industrial')) return 'Industrials';
-  if (normalized.includes('health')) return 'Health Care';
-  if (normalized.includes('energy')) return 'Energy';
-  if (normalized.includes('communication')) return 'Communication Services';
-  if (normalized.includes('material')) return 'Materials';
-  if (normalized.includes('utility')) return 'Utilities';
-  if (normalized.includes('real estate')) return 'Real Estate';
+export function getDisplayAssetClass(assetClass?: string, subCategory?: string): string {
+  const normalizedAssetClass = (assetClass ?? '').trim();
+  const normalizedSubCategory = (subCategory ?? '').trim();
+  const assetClassUpper = normalizedAssetClass.toUpperCase();
+  const subCategoryUpper = normalizedSubCategory.toUpperCase();
 
-  return 'Other';
+  // IBKR reports ETFs with assetClass "STK" and subCategory "ETF".
+  // The more specific subCategory must win over generic stock-like asset classes.
+  if (subCategoryUpper === 'ETF' || assetClassUpper === 'ETF') {
+    return 'ETF';
+  }
+
+  if (
+    subCategoryUpper === 'COMMON' ||
+    subCategoryUpper === 'COMMON STOCK' ||
+    subCategoryUpper === 'STK' ||
+    subCategoryUpper === 'STOCK' ||
+    assetClassUpper === 'COMMON STOCK' ||
+    assetClassUpper === 'COMMON' ||
+    assetClassUpper === 'STK' ||
+    assetClassUpper === 'STOCK'
+  ) {
+    return 'Stock';
+  }
+
+  if (normalizedSubCategory.length > 0) {
+    return titleCaseLabel(normalizedSubCategory);
+  }
+
+  if (normalizedAssetClass.length > 0) {
+    return titleCaseLabel(normalizedAssetClass);
+  }
+
+  return '';
+}
+
+export function getPositionDisplayAssetClass(position: Pick<Position, 'assetClass' | 'subCategory' | 'sector'>): string {
+  return getDisplayAssetClass(position.assetClass ?? position.sector, position.subCategory) || position.sector;
+}
+
+function mapBrokerClassification(position: IBKRPortfolio['positions'][number]): Sector {
+  return getPositionDisplayAssetClass({
+    assetClass: position.assetClass,
+    subCategory: position.subCategory,
+    sector: position.assetClass,
+  });
 }
 
 export function mapIbkrPositionsToPortfolioPositions(ibkrPortfolio: IBKRPortfolio): Position[] {
   return ibkrPortfolio.positions
     .filter((position) => position.symbol && position.quantity > 0)
     .map((position, index) => ({
-      id: `ibkr-${position.symbol}-${index}`,
+      id: `ibkr-${position.symbol}-${position.conid || index}`,
       ticker: position.symbol,
+      name: position.description,
       shares: position.quantity,
       avgCost:
         position.quantity > 0
           ? position.costBasisMoney / position.quantity
           : position.costBasisMoney,
       currentPrice: position.markPrice,
-      sector: mapAssetClassToSector(position.assetClass),
-      thesis: `Imported from IBKR (${position.assetClass})`,
+      sector: mapBrokerClassification(position),
+      thesis: position.description || `Imported from IBKR (${position.assetClass})`,
+      assetClass: position.assetClass,
+      subCategory: position.subCategory,
+      listingExchange: position.listingExchange,
+      issuerCountryCode: position.issuerCountryCode,
+      percentOfNav: position.percentOfNav,
+      reportDate: position.reportDate,
+      brokerSource: true,
+      accountId: position.accountId,
+      accountAlias: position.accountAlias,
+      conid: position.conid,
+      cusip: position.cusip,
+      isin: position.isin,
+      figi: position.figi,
     }));
 }
 
