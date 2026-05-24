@@ -37,6 +37,26 @@ type SpyHistoryQuery = {
   range?: string;
 };
 
+type SecurityTickerParams = {
+  ticker: string;
+};
+
+type TickerEvidenceRow = {
+  ticker: string;
+  market_cap: number | null;
+  trailing_pe: number | null;
+  forward_pe: number | null;
+  price_to_book: number | null;
+  profit_margins: number | null;
+  revenue_growth: number | null;
+  fifty_day_ma: number | null;
+  two_hundred_day_ma: number | null;
+  fifty_two_week_high: number | null;
+  fifty_two_week_low: number | null;
+  current_price: number | null;
+  last_updated: string | null;
+};
+
 type FinnhubNewsItem = {
   datetime: number;
   [key: string]: unknown;
@@ -312,6 +332,75 @@ function registerApiRoutes(app: Express): void {
       return res.status(500).json({ error: 'Failed to fetch readiness' });
     }
   });
+
+  app.get(
+    '/api/research/security/:ticker',
+    (
+      req: Request<SecurityTickerParams>,
+      res: Response,
+    ) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+
+      try {
+        const db = new Database(DB_PATH, {fileMustExist: false});
+
+        const tableCheck = db
+          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ticker_evidence'")
+          .get();
+        if (!tableCheck) {
+          db.close();
+          return res.status(404).json({error: 'Evidence table not initialized'});
+        }
+
+        const row = db
+          .prepare(
+            `
+              SELECT ticker, market_cap, trailing_pe, forward_pe, price_to_book,
+                     profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
+                     fifty_two_week_high, fifty_two_week_low, current_price, last_updated
+              FROM ticker_evidence
+              WHERE ticker = ?
+            `,
+          )
+          .get(ticker) as TickerEvidenceRow | undefined;
+        db.close();
+
+        if (!row) {
+          return res.status(404).json({
+            error: `No evidence found for ${ticker}. Run collect_evidence.py first.`,
+          });
+        }
+
+        return res.json({
+          ticker: row.ticker,
+          valuation: {
+            marketCap: row.market_cap,
+            trailingPE: row.trailing_pe,
+            forwardPE: row.forward_pe,
+            priceToBook: row.price_to_book,
+          },
+          fundamentals: {
+            profitMargins: row.profit_margins,
+            revenueGrowth: row.revenue_growth,
+          },
+          technicals: {
+            fiftyDayMA: row.fifty_day_ma,
+            twoHundredDayMA: row.two_hundred_day_ma,
+            fiftyTwoWeekHigh: row.fifty_two_week_high,
+            fiftyTwoWeekLow: row.fifty_two_week_low,
+            currentPrice: row.current_price,
+          },
+          lastUpdated: row.last_updated,
+        });
+      } catch (error) {
+        console.error('Security evidence error:', error);
+        return res.status(500).json({error: 'Failed to fetch security evidence'});
+      }
+    },
+  );
 
   app.get('/api/portfolio/ibkr', async (_req: Request, res: Response) => {
     try {

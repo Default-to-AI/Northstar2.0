@@ -8,6 +8,7 @@ import Watchlist from './pages/Watchlist';
 import Archive from './pages/Archive';
 import Committee from './pages/Committee';
 import Scanner from './pages/Scanner';
+import EvidencePacket from './pages/EvidencePacket';
 import { Badge } from '@/components/ui/badge';
 import PipelineReadinessIndicator from './components/PipelineReadinessIndicator';
 
@@ -107,6 +108,7 @@ export default function App() {
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/committee" element={<Committee />} />
                 <Route path="/scanner" element={<Scanner />} />
+                <Route path="/security/:ticker" element={<EvidencePacket />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>

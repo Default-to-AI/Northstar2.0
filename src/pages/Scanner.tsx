@@ -92,7 +92,7 @@ export default function Scanner() {
                          variant="ghost" 
                          size="icon" 
                          className="h-8 w-8 rounded-none text-muted-foreground hover:text-primary hover:bg-primary/5"
-                         onClick={() => navigate(`/committee?ticker=${op.ticker}`)}
+                         onClick={() => navigate(`/security/${op.ticker}`)}
                        >
                          <ChevronRight size={18} />
                        </Button>
