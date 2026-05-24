@@ -52,6 +52,20 @@ function formatPercent(value: number | null): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function formatDate(dateString: string | null): string {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return 'N/A';
+  
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  
+  return `${day}/${month}/${year} at ${hours}:${minutes}`;
+}
+
 export default function EvidencePacket() {
   const {ticker = ''} = useParams<{ticker: string}>();
   const normalizedTicker = ticker.toUpperCase();
@@ -121,7 +135,7 @@ export default function EvidencePacket() {
 
           <Card className="rounded-none border-border p-4 bg-muted/10 md:col-span-2">
             <p className="text-xs font-mono uppercase text-muted-foreground">
-              Last Updated: {data.lastUpdated ?? 'N/A'}
+              Last Updated: {formatDate(data.lastUpdated)}
             </p>
           </Card>
         </div>
