@@ -56,6 +56,8 @@ type TickerEvidenceRow = {
   current_price: number | null;
   last_updated: string | null;
   free_cashflow: number | null;
+  free_cashflow_margin: number | null;
+  free_cashflow_yield: number | null;
 };
 
 type FinnhubNewsItem = {
@@ -361,7 +363,8 @@ function registerApiRoutes(app: Express): void {
             `
               SELECT ticker, market_cap, trailing_pe, forward_pe, price_to_book,
                      profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-                     fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow
+                     fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow,
+                     free_cashflow_margin, free_cashflow_yield
               FROM ticker_evidence
               WHERE ticker = ?
             `,
@@ -387,6 +390,8 @@ function registerApiRoutes(app: Express): void {
             profitMargins: row.profit_margins,
             revenueGrowth: row.revenue_growth,
             freeCashflow: row.free_cashflow,
+            freeCashflowMargin: row.free_cashflow_margin,
+            freeCashflowYield: row.free_cashflow_yield,
           },
           technicals: {
             fiftyDayMA: row.fifty_day_ma,

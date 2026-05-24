@@ -37,6 +37,10 @@ def collect_evidence(ticker):
     current_price = info.get('currentPrice') or info.get('regularMarketPrice')
     free_cashflow = info.get('freeCashflow')
     
+    total_revenue = info.get('totalRevenue')
+    free_cashflow_margin = (free_cashflow / total_revenue) if free_cashflow and total_revenue else None
+    free_cashflow_yield = (free_cashflow / market_cap) if free_cashflow and market_cap else None
+    
     last_updated = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     conn = init_db()
@@ -45,8 +49,9 @@ def collect_evidence(ticker):
         INSERT INTO ticker_evidence (
             ticker, market_cap, trailing_pe, forward_pe, price_to_book,
             profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-            fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow,
+            free_cashflow_margin, free_cashflow_yield
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker) DO UPDATE SET
             market_cap=excluded.market_cap,
             trailing_pe=excluded.trailing_pe,
@@ -60,11 +65,14 @@ def collect_evidence(ticker):
             fifty_two_week_low=excluded.fifty_two_week_low,
             current_price=excluded.current_price,
             last_updated=excluded.last_updated,
-            free_cashflow=excluded.free_cashflow
+            free_cashflow=excluded.free_cashflow,
+            free_cashflow_margin=excluded.free_cashflow_margin,
+            free_cashflow_yield=excluded.free_cashflow_yield
     ''', (
         ticker, market_cap, trailing_pe, forward_pe, price_to_book,
         profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-        fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow
+        fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow,
+        free_cashflow_margin, free_cashflow_yield
     ))
     conn.commit()
     conn.close()
