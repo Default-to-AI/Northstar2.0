@@ -15,6 +15,7 @@ type EvidencePacketResponse = {
   fundamentals: {
     profitMargins: number | null;
     revenueGrowth: number | null;
+    freeCashflow: number | null;
   };
   technicals: {
     fiftyDayMA: number | null;
@@ -120,6 +121,7 @@ export default function EvidencePacket() {
             <h2 className="font-mono text-xs uppercase tracking-widest text-primary">Fundamentals</h2>
             <p className="text-sm">Profit Margins: {formatPercent(data.fundamentals.profitMargins)}</p>
             <p className="text-sm">Revenue Growth: {formatPercent(data.fundamentals.revenueGrowth)}</p>
+            <p className="text-sm">Free Cash Flow: {formatNumber(data.fundamentals.freeCashflow, {notation: 'compact'})}</p>
           </Card>
 
           <Card className="rounded-none border-border p-4 bg-[#0d0d14] space-y-2 md:col-span-2">

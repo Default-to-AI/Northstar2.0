@@ -35,6 +35,7 @@ def collect_evidence(ticker):
     fifty_two_week_high = info.get('fiftyTwoWeekHigh')
     fifty_two_week_low = info.get('fiftyTwoWeekLow')
     current_price = info.get('currentPrice') or info.get('regularMarketPrice')
+    free_cashflow = info.get('freeCashflow')
     
     last_updated = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -44,8 +45,8 @@ def collect_evidence(ticker):
         INSERT INTO ticker_evidence (
             ticker, market_cap, trailing_pe, forward_pe, price_to_book,
             profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-            fifty_two_week_high, fifty_two_week_low, current_price, last_updated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(ticker) DO UPDATE SET
             market_cap=excluded.market_cap,
             trailing_pe=excluded.trailing_pe,
@@ -58,11 +59,12 @@ def collect_evidence(ticker):
             fifty_two_week_high=excluded.fifty_two_week_high,
             fifty_two_week_low=excluded.fifty_two_week_low,
             current_price=excluded.current_price,
-            last_updated=excluded.last_updated
+            last_updated=excluded.last_updated,
+            free_cashflow=excluded.free_cashflow
     ''', (
         ticker, market_cap, trailing_pe, forward_pe, price_to_book,
         profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-        fifty_two_week_high, fifty_two_week_low, current_price, last_updated
+        fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow
     ))
     conn.commit()
     conn.close()

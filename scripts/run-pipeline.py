@@ -32,7 +32,8 @@ def init_db():
             fifty_two_week_high REAL,
             fifty_two_week_low REAL,
             current_price REAL,
-            last_updated DATETIME
+            last_updated DATETIME,
+            free_cashflow REAL
         )
     ''')
     conn.commit()
