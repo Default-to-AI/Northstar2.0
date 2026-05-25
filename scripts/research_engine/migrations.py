@@ -99,6 +99,7 @@ def migrate(conn: sqlite3.Connection) -> None:
                 debt_to_equity REAL, net_cash REAL, current_ratio REAL, roe REAL, roic REAL,
                 revenue_per_employee REAL, fifty_day_ma REAL, two_hundred_day_ma REAL,
                 fifty_two_week_high REAL, fifty_two_week_low REAL, current_price REAL,
+                avg_dollar_volume REAL,
                 momentum_history TEXT, valuation_history TEXT,
                 FOREIGN KEY(ticker) REFERENCES securities(ticker),
                 FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
@@ -184,6 +185,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "fundamentals", "missing_reason", "TEXT")
         _add_column_if_missing(conn, "fundamentals", "pipeline_run_id", "INTEGER")
         _add_column_if_missing(conn, "fundamentals", "source_run_id", "INTEGER")
+        _add_column_if_missing(conn, "fundamentals", "avg_dollar_volume", "REAL")
 
     if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='score_snapshots'").fetchone():
         _add_column_if_missing(conn, "score_snapshots", "factor_snapshot_id", "INTEGER")

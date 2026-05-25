@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
 import { LayoutDashboard, List, Users, Archive as ArchiveIcon, UserCircle, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import CommandCenter from './pages/CommandCenter';
 import Dashboard from './pages/Dashboard';
 import Profile from './pages/Profile';
 import Watchlist from './pages/Watchlist';
@@ -34,7 +35,8 @@ function StubPage({ title }: { title: string }) {
 
 function Sidebar() {
   const navItems = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    { to: '/', icon: LayoutDashboard, label: 'Command Center' },
+    { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/watchlist', icon: List, label: 'Watchlist' },
     { to: '/committee', icon: Users, label: 'Committee' },
     { to: '/scanner', icon: Sparkles, label: 'Scanner' },
@@ -96,7 +98,8 @@ export default function App() {
             </header>
             <div className="flex-1 overflow-y-auto">
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<CommandCenter />} />
+                <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/committee" element={<Committee />} />
                 <Route path="/scanner" element={<Scanner />} />

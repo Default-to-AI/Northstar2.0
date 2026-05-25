@@ -57,6 +57,10 @@ export interface ArchiveSession {
   outcome: Outcome;
   outcomeText: string;
   fullTranscript: unknown;
+  committeeSessionId?: string;
+  evidencePacketId?: string;
+  committeeModel?: string;
+  committeeExternalLlm?: boolean;
 }
 
 export type WatchReason = 'POPULAR' | 'UNDERVALUED' | 'WAITING FOR ENTRY' | 'RESEARCHING';
