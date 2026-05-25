@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -99,6 +99,7 @@ def migrate(conn: sqlite3.Connection) -> None:
                 debt_to_equity REAL, net_cash REAL, current_ratio REAL, roe REAL, roic REAL,
                 revenue_per_employee REAL, fifty_day_ma REAL, two_hundred_day_ma REAL,
                 fifty_two_week_high REAL, fifty_two_week_low REAL, current_price REAL,
+                avg_dollar_volume REAL,
                 momentum_history TEXT, valuation_history TEXT,
                 FOREIGN KEY(ticker) REFERENCES securities(ticker),
                 FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
@@ -149,9 +150,42 @@ def migrate(conn: sqlite3.Connection) -> None:
                 FOREIGN KEY(score_model_id) REFERENCES score_model_versions(model_id)
             )
         """)
+        _migrate_v2(conn)
         _ensure_columns(conn)
         _backfill_legacy(conn)
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
+
+
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """V2: decision_outcomes table for tracking forward returns."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS decision_outcomes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_type TEXT NOT NULL CHECK(source_type IN ('scanner_signal','committee_playbook','user_decision','alert')),
+            source_id INTEGER NOT NULL,
+            horizon_days INTEGER NOT NULL DEFAULT 5,
+            ticker TEXT NOT NULL,
+            decision_date TEXT NOT NULL,
+            decision_price REAL,
+            spy_price REAL,
+            sector_benchmark TEXT,
+            sector_return REAL,
+            forward_price REAL,
+            forward_return REAL,
+            benchmark_return REAL,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','computed','partial','terminal')),
+            score_snapshot_id INTEGER,
+            evidence_packet_id TEXT,
+            committee_session_id TEXT,
+            score_model_id TEXT,
+            source_freshness TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            computed_at TEXT,
+            UNIQUE(source_type, source_id, horizon_days),
+            FOREIGN KEY(ticker) REFERENCES securities(ticker)
+        )
+    """)
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
@@ -184,6 +218,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "fundamentals", "missing_reason", "TEXT")
         _add_column_if_missing(conn, "fundamentals", "pipeline_run_id", "INTEGER")
         _add_column_if_missing(conn, "fundamentals", "source_run_id", "INTEGER")
+        _add_column_if_missing(conn, "fundamentals", "avg_dollar_volume", "REAL")
 
     if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='score_snapshots'").fetchone():
         _add_column_if_missing(conn, "score_snapshots", "factor_snapshot_id", "INTEGER")

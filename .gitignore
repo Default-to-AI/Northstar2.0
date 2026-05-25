@@ -5,6 +5,8 @@ coverage/
 .DS_Store
 *.log
 .worktrees/
+__pycache__/
+*.pyc
 .env*
 !.env.example
 .vercel

@@ -30,7 +30,7 @@ Core decisions:
 - Frontend: React + Vite + TanStack Query + shadcn/ui.
 - Backend: Express (`src/server/app.ts`) for API contracts and UI-facing routes.
 - Batch/data: Python collectors/scoring jobs should own yfinance/pandas-style market collection and factor calculation.
-- Storage: planned SQLite research store for securities, daily prices, fundamentals, news/events/chatter, factor snapshots, score snapshots, watchlist links, committee sessions, alerts, and decision outcomes.
+- Storage: SQLite research store for securities, daily prices, fundamentals, news/events/chatter, factor snapshots, score snapshots, watchlist links, committee sessions, alerts, and decision outcomes.
 - Portfolio context: IBKR Flex XML → normalized portfolio (`src/services/ibkr/sync.ts`, `src/types/ibkr.ts`) → `data/ibkr-portfolio.json` → frontend hooks.
 - Hooks: `src/hooks/useIBKRPortfolio.ts`, `src/hooks/portfolioHydration.ts`, `src/hooks/usePortfolioData.ts`.
 - Fallback: seed positions and watchlist in `src/constants.ts` until SQLite-backed state replaces localStorage.
@@ -39,9 +39,11 @@ Core decisions:
 
 - `src/pages/Scanner.tsx` is mock/hardcoded and should be replaced by SQLite-backed scanner APIs.
 - `src/lib/watchlistEnhancements.ts` has deterministic watchlist scoring, but it is shallow and should become a consumer of stored factor/score snapshots.
-- `src/pages/Committee.tsx` and `/api/committee/session` are currently ticker-only Gemini flows; committee must be grounded in evidence packets before its verdicts are trusted.
+- `src/pages/Committee.tsx` and `POST /api/research/committee/session` consume frozen evidence packets; ticker-only requests are rejected. Committee output is validated against evidence citations and risk governance bounds before persistence.
 - `src/pages/Dashboard.tsx` and IBKR analytics are useful portfolio context, but should not define the product center of gravity.
 - Browser `localStorage` is acceptable for temporary UI state only; durable watchlist/thesis/outcome state should move to SQLite.
+- `scripts/research_engine/outcomes.py` computes 1w forward returns for scanner signals and committee playbooks. The `decision_outcomes` table tracks outcomes idempotently via `UNIQUE(source_type, source_id, horizon_days)`.
+- Alert rules (`src/lib/alertRules.ts`) emit four types: `pipeline_failure`, `review_ready_setup`, `risk_breach`, `earnings_filing_shock`. Deduplication uses `alert_type + ticker + source_run_id + score_snapshot_id`. Alerts are acknowledged via `POST /api/research/alerts/:id/acknowledge`.
 
 ## Key endpoints / planned contracts
 
@@ -50,7 +52,11 @@ Existing:
 - `GET /api/portfolio/ibkr` — latest IBKR portfolio snapshot from `data/ibkr-portfolio.json`.
 - `GET /api/portfolio/ibkr/analytics` — portfolio analytics against SPY from IBKR snapshot.
 - `/api/news/*`, `/api/stock/*`, `/api/market/fear-greed` — market/news support routes.
-- `POST /api/committee/session` — current ungrounded committee endpoint; must be replaced or wrapped with evidence-packet input.
+- `POST /api/committee/session` — legacy ticker-only endpoint; returns error redirecting to evidence-packet flow.
+- `POST /api/research/committee/session` — evidence-grounded committee run with risk governance and citation validation.
+- `GET /api/research/alerts` — research alerts with four types; refresh on poll, deduplicated by lineage key.
+- `POST /api/research/alerts/:id/acknowledge` — user acknowledgment of an alert.
+- `GET /api/research/outcomes` — computed forward return records from `decision_outcomes`.
 
 Needed:
 
@@ -58,9 +64,7 @@ Needed:
 - `GET /api/research/briefing` — command-center morning brief.
 - `GET /api/research/scanner?queue=compounder|tactical` — ranked opportunities from score snapshots.
 - `GET /api/research/security/:ticker` — normalized evidence packet for one ticker.
-- `POST /api/research/committee/session` — evidence-grounded committee run.
 - `GET /api/research/events` — earnings, macro events, and relevant holding/watchlist/candidate catalysts.
-- `GET /api/research/alerts` — high-confidence intraday exceptions.
 
 ## Conventions
 
@@ -68,8 +72,9 @@ Needed:
 - Do not let LLM output become primary source of truth. LLMs synthesize evidence packets; deterministic data and explicit freshness rules drive scores.
 - Use tiered data readiness: core sources must pass; secondary sources can be stale only with visible warnings.
 - Store score model weights in a versioned config and record score model IDs on every score snapshot.
-- Track decision outcomes prospectively: 1w/1m/3m forward returns versus SPY and relevant sectors.
-- Default alert policy is conservative: buy-ready setup, risk breach, earnings/filing shock, or data pipeline failure.
+- Committee sessions require a frozen evidence packet; ticker-only requests are rejected. LLM output is validated against evidence citations and deterministic risk governance before persistence. Risk config lives in `config/risk-model/v1.json`.
+- Track decision outcomes prospectively: 1w/1m/3m forward returns versus SPY and relevant sectors. Outcome job runs as `python3 -m scripts.research_engine.outcomes`; idempotent key is `(source_type, source_id, horizon_days)`.
+- Default alert policy is conservative: buy-ready setup, risk breach, earnings/filing shock, or data pipeline failure. Alerts deduplicated by `alert_type + ticker + source_run_id + score_snapshot_id`.
 - Keep v1 local/private. No broker execution, public cloud, paid data dependency, options/crypto, or full SaaS auth in v1.
 - All live portfolio formatting goes through `src/services/ibkr/sync.ts` → `data/ibkr-portfolio.json`.
 - FE hydration: `src/hooks/portfolioHydration.ts` normalizes raw IBKR payload into table rows.

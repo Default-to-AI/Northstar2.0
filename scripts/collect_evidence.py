@@ -23,7 +23,7 @@ FUNDAMENTAL_COLUMNS = [
     "revenue_growth", "eps", "ebitda", "diluted_net_income", "debt_to_equity",
     "net_cash", "current_ratio", "roe", "roic", "revenue_per_employee",
     "fifty_day_ma", "two_hundred_day_ma", "fifty_two_week_high",
-    "fifty_two_week_low", "current_price", "momentum_history", "valuation_history",
+    "fifty_two_week_low", "current_price", "avg_dollar_volume", "momentum_history", "valuation_history",
 ]
 
 
@@ -113,9 +113,14 @@ def collect_evidence(ticker: str) -> None:
         "fifty_two_week_high": _finite_or_none(info.get("fiftyTwoWeekHigh")),
         "fifty_two_week_low": _finite_or_none(info.get("fiftyTwoWeekLow")),
         "current_price": _finite_or_none(info.get("currentPrice") or info.get("regularMarketPrice")),
+        "avg_dollar_volume": None,
         "momentum_history": json.dumps(momentum_history),
         "valuation_history": json.dumps(valuation_history),
     }
+    average_volume = _finite_or_none(info.get("averageVolume") or info.get("averageVolume10days"))
+    current_price = fundamentals.get("current_price")
+    if average_volume is not None and isinstance(current_price, float):
+        fundamentals["avg_dollar_volume"] = average_volume * current_price
     missing_core = [key for key in ("current_price", "revenue_growth") if fundamentals.get(key) is None]
     status = "degraded" if missing_core else "ready"
     missing_reason = f"missing core fields: {', '.join(missing_core)}" if missing_core else None

@@ -1,0 +1,10 @@
+{
+  "version": "v1",
+  "maxPositionPct": 10,
+  "maxLossPct": 1,
+  "liquidityFloorUsd": 5000000,
+  "concentrationCaps": {
+    "singleNamePct": 10,
+    "sectorPct": 30
+  }
+}

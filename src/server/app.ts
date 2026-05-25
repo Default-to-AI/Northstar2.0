@@ -12,12 +12,21 @@ import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
 import type {IBKRPortfolioSnapshot} from '../types/ibkr';
 import {openResearchDb} from './research/db.ts';
+import {registerCommitteeRoutes} from './research/committee.ts';
+import {registerArchiveRoutes} from './research/archive.ts';
+import {registerAlertRoutes} from './research/alerts.ts';
+import {registerOutcomeRoutes} from './research/outcomes.ts';
+import {freezeEvidencePacket, getFrozenEvidencePacket} from './research/evidence.ts';
 
 dotenv.config();
 
 const isProd = process.env.NODE_ENV === 'production';
 
 type CommitteeSessionRequest = {
+  ticker?: string;
+};
+
+type FreezeEvidenceRequest = {
   ticker?: string;
 };
 
@@ -85,6 +94,7 @@ type TickerEvidenceRow = {
   warnings: string | null;
   compounder_score: number | null;
   tactical_score: number | null;
+  avg_dollar_volume: number | null;
 };
 
 type PipelineRunRow = {
@@ -166,17 +176,164 @@ function registerApiRoutes(app: Express): void {
       req: Request<Record<string, never>, unknown, CommitteeSessionRequest>,
       res: Response,
     ) => {
-      const {ticker} = req.body;
-      if (!ticker) {
-        return res.status(400).json({error: 'Ticker is required'});
-      }
-
       return res.status(409).json({
         error:
-          'Legacy ticker-only committee sessions are disabled. Slice 4 must create /api/research/committee/session from a frozen evidence packet before LLM analysis can run.',
+          'Legacy ticker-only committee sessions are disabled. Use /api/research/committee/session with evidencePacketId from a frozen evidence packet.',
       });
     },
   );
+
+  registerCommitteeRoutes(app, openResearchDb);
+  registerArchiveRoutes(app, openResearchDb);
+  registerAlertRoutes(app, openResearchDb);
+  registerOutcomeRoutes(app, openResearchDb);
+
+  app.post('/api/research/evidence/freeze', (req: Request<Record<string, never>, unknown, FreezeEvidenceRequest>, res: Response) => {
+    const ticker = req.body?.ticker?.trim().toUpperCase();
+    if (!ticker) {
+      return res.status(400).json({error: 'ticker is required'});
+    }
+
+    let db: ReturnType<typeof openResearchDb> | null = null;
+    try {
+      db = openResearchDb();
+      const row = db
+        .prepare(
+          `
+            SELECT s.ticker, f.market_cap, f.trailing_pe, f.forward_pe, f.price_to_book,
+                   f.profit_margins, f.revenue_growth, f.fifty_day_ma, f.two_hundred_day_ma,
+                   f.fifty_two_week_high, f.fifty_two_week_low, f.current_price, f.data_as_of as last_updated, f.free_cashflow,
+                   (f.free_cashflow / (f.market_cap / f.price_to_sales)) as free_cashflow_margin,
+                   (f.free_cashflow / f.market_cap) as free_cashflow_yield,
+                   f.gross_margin, f.operating_margin,
+                   f.eps, f.ebitda, f.diluted_net_income, f.price_to_sales, f.ev_to_ebitda, f.ev_to_gross_profit,
+                   f.peg_ratio, f.operating_cash_flow, f.debt_to_equity, f.net_cash, f.current_ratio,
+                   f.roe, f.roic, f.revenue_per_employee, NULL as earnings_revisions, NULL as share_buybacks,
+                   NULL as insider_transactions, f.momentum_history, f.valuation_history,
+                   ss.id as score_snapshot_id, ss.score_model_id, ss.actionability_state, ss.warnings,
+                   ss.compounder_score, ss.tactical_score,
+                   f.avg_dollar_volume
+            FROM securities s
+            JOIN fundamentals f ON s.ticker = f.ticker
+            LEFT JOIN score_snapshots ss ON ss.id = (
+              SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+            )
+            WHERE s.ticker = ?
+          `,
+        )
+        .get(ticker) as TickerEvidenceRow | undefined;
+
+      if (!row) {
+        return res.status(404).json({error: `No evidence found for ${ticker}. Run collect_evidence.py first.`});
+      }
+
+      const payload = {
+        ticker: row.ticker,
+        valuation: {
+          marketCap: row.market_cap,
+          trailingPE: row.trailing_pe,
+          forwardPE: row.forward_pe,
+          priceToBook: row.price_to_book,
+          priceToSales: row.price_to_sales,
+          evToEbitda: row.ev_to_ebitda,
+          evToGrossProfit: row.ev_to_gross_profit,
+          pegRatio: row.peg_ratio,
+        },
+        fundamentals: {
+          profitMargins: row.profit_margins,
+          revenueGrowth: row.revenue_growth,
+          freeCashflow: row.free_cashflow,
+          freeCashflowMargin: row.free_cashflow_margin,
+          freeCashflowYield: row.free_cashflow_yield,
+          grossMargin: row.gross_margin,
+          operatingMargin: row.operating_margin,
+          eps: row.eps,
+          ebitda: row.ebitda,
+          dilutedNetIncome: row.diluted_net_income,
+          operatingCashFlow: row.operating_cash_flow,
+        },
+        financialStrength: {
+          debtToEquity: row.debt_to_equity,
+          netCash: row.net_cash,
+          currentRatio: row.current_ratio,
+          roe: row.roe,
+          roic: row.roic,
+          revenuePerEmployee: row.revenue_per_employee,
+          earningsRevisions: row.earnings_revisions,
+          shareBuybacks: row.share_buybacks,
+          insiderTransactions: row.insider_transactions,
+        },
+        technicals: {
+          fiftyDayMA: row.fifty_day_ma,
+          twoHundredDayMA: row.two_hundred_day_ma,
+          fiftyTwoWeekHigh: row.fifty_two_week_high,
+          fiftyTwoWeekLow: row.fifty_two_week_low,
+          currentPrice: row.current_price,
+        },
+        marketData: {
+          avgDollarVolume: row.avg_dollar_volume,
+        },
+        liquidity: {
+          avgDollarVolume: row.avg_dollar_volume,
+        },
+        history: {
+          momentum: parseJsonArray(row.momentum_history),
+          valuation: parseJsonArray(row.valuation_history),
+        },
+        score: {
+          snapshotId: row.score_snapshot_id,
+          modelId: row.score_model_id,
+          actionabilityState: row.actionability_state,
+          compounderScore: row.compounder_score,
+          tacticalScore: row.tactical_score,
+          warnings: parseJsonStringArray(row.warnings),
+        },
+        lastUpdated: row.last_updated,
+      };
+
+      const packet = freezeEvidencePacket(db, {
+        ticker,
+        scoreSnapshotId: row.score_snapshot_id,
+        scoreModelId: row.score_model_id,
+        payload,
+      });
+
+      return res.status(201).json({
+        id: packet.id,
+        ticker: packet.ticker,
+        scoreSnapshotId: packet.scoreSnapshotId,
+        scoreModelId: packet.scoreModelId,
+        frozenAt: packet.frozenAt,
+      });
+    } catch (error) {
+      console.error('Freeze evidence error:', error);
+      return res.status(500).json({error: 'Failed to freeze evidence packet'});
+    } finally {
+      db?.close();
+    }
+  });
+
+  app.get('/api/research/evidence/:id', (req: Request<{id: string}>, res: Response) => {
+    let db: ReturnType<typeof openResearchDb> | null = null;
+    try {
+      db = openResearchDb();
+      const packet = getFrozenEvidencePacket(db, req.params.id);
+      if (!packet) {
+        return res.status(404).json({error: `Frozen evidence packet not found: ${req.params.id}`});
+      }
+      const payload = JSON.parse(packet.payloadJson) as {score?: {actionabilityState?: string}};
+      return res.json({
+        id: packet.id,
+        ticker: packet.ticker,
+        actionabilityState: payload.score?.actionabilityState ?? 'unknown',
+      });
+    } catch (error) {
+      console.error('Evidence status error:', error);
+      return res.status(500).json({error: 'Failed to fetch evidence packet status'});
+    } finally {
+      db?.close();
+    }
+  });
 
   app.get('/api/market/fear-greed', async (_req: Request, res: Response) => {
     try {
@@ -323,7 +480,8 @@ function registerApiRoutes(app: Express): void {
                      f.roe, f.roic, f.revenue_per_employee, NULL as earnings_revisions, NULL as share_buybacks,
                      NULL as insider_transactions, f.momentum_history, f.valuation_history,
                      ss.id as score_snapshot_id, ss.score_model_id, ss.actionability_state, ss.warnings,
-                     ss.compounder_score, ss.tactical_score
+                     ss.compounder_score, ss.tactical_score,
+                   f.avg_dollar_volume
               FROM securities s
               JOIN fundamentals f ON s.ticker = f.ticker
               LEFT JOIN score_snapshots ss ON ss.id = (
