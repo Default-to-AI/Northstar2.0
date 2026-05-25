@@ -22,7 +22,7 @@ function seed(): void {
     CREATE TABLE IF NOT EXISTS score_snapshots (
       id INTEGER PRIMARY KEY,
       ticker TEXT NOT NULL,
-      source_run_id INTEGER,
+      pipeline_run_id INTEGER,
       score_model_id TEXT,
       actionability_state TEXT,
       warnings TEXT,
@@ -38,11 +38,11 @@ function seed(): void {
 
   db.prepare('INSERT INTO source_runs (id, source_name, status, error_message) VALUES (1, ?, ?, ?)').run('finnhub', 'failed', 'timeout');
   db.prepare(`
-    INSERT INTO score_snapshots (id, ticker, source_run_id, score_model_id, actionability_state, warnings, compounder_score, tactical_score)
+    INSERT INTO score_snapshots (id, ticker, pipeline_run_id, score_model_id, actionability_state, warnings, compounder_score, tactical_score)
     VALUES (11, 'NVDA', 101, 'test-model', 'fresh_actionable', '["risk_breach: concentration"]', 85, 80)
   `).run();
   db.prepare(`
-    INSERT INTO score_snapshots (id, ticker, source_run_id, score_model_id, actionability_state, warnings, compounder_score, tactical_score)
+    INSERT INTO score_snapshots (id, ticker, pipeline_run_id, score_model_id, actionability_state, warnings, compounder_score, tactical_score)
     VALUES (12, 'AAPL', 102, 'test-model', 'fresh_actionable', '["earnings_shock: guidance cut"]', 83, 77)
   `).run();
 
