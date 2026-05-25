@@ -1,0 +1,28 @@
+{
+  "model_id": "v1",
+  "version": "1.0.0",
+  "core_required": [
+    "current_price",
+    "revenue_growth"
+  ],
+  "compounder": {
+    "base": 50,
+    "weights": {
+      "roic_gt_15": 10,
+      "roe_gt_20": 10,
+      "revenue_growth_gt_10": 10,
+      "operating_margin_gt_20": 10,
+      "current_ratio_gt_1_5": 10
+    }
+  },
+  "tactical": {
+    "base": 50,
+    "weights": {
+      "ma_50_above_200": 15,
+      "ma_50_below_200": -10,
+      "near_52w_low": 20,
+      "strong_uptrend": 10,
+      "forward_pe_lt_20": 15
+    }
+  }
+}

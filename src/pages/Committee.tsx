@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Loader2, Sparkles, AlertTriangle, CheckCircle2, ChevronRight, MessageSquare, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Loader2, Sparkles, AlertTriangle, CheckCircle2, ArrowRight } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,39 +7,29 @@ import { Badge } from '@/components/ui/badge';
 import { motion, AnimatePresence } from 'motion/react';
 import { useArchive } from '../hooks/useArchive';
 import { Verdict, Outcome } from '../types';
-import { useSearchParams } from 'react-router-dom';
 
-const PERSONAS = [
-  { key: 'M', name: 'Mahaney', color: '#f5c518', role: 'Technologist', lens: 'Growth, TAM, Category Leadership' },
-  { key: 'H', name: 'Hohn', color: '#00c896', role: 'Activist', lens: 'Value, Governance, Normalized Earnings' },
-  { key: 'C', name: 'Cohen', color: '#ff4757', role: 'Trader', lens: 'Risk/Reward, Catalysts, Timing' },
-  { key: 'Mi', name: 'Micha', color: '#3b82f6', role: 'Trend Follower', lens: 'Price Momentum, 150MA' },
-  { key: 'Ca', name: 'Carlson', color: '#a855f7', role: 'Compounder', lens: 'FCF, Moats, Dividend Growth' },
-];
+type CommitteeReport = {
+  category: 'BUY' | 'ADD' | 'HOLD' | 'TRIM' | 'SELL' | 'WATCH';
+  market_implication: string;
+};
+
+type CommitteeResponse = {error?: string; final?: CommitteeReport};
+import { useSearchParams } from 'react-router-dom';
 
 export default function Committee() {
   const { addSession } = useArchive();
   const [searchParams] = useSearchParams();
   const [ticker, setTicker] = useState(searchParams.get('ticker') || "");
   const [isSearching, setIsSearching] = useState(false);
-  const [sessionState, setSessionState] = useState<'IDLE' | 'ACT1' | 'ACT2' | 'ACT3' | 'COMPLETE'>('IDLE');
-  const [sessionData, setSessionData] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const [sessionState, setSessionState] = useState<'IDLE' | 'ANALYZING' | 'COMPLETE'>('IDLE');
+  const [report, setReport] = useState<CommitteeReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const startSession = async () => {
     if (!ticker) return;
     setIsSearching(true);
-    setMessages([]);
-    setSessionState('ACT1');
+    setError(null);
+    setSessionState('ANALYZING');
 
     try {
       const response = await fetch("/api/committee/session", {
@@ -47,78 +37,54 @@ export default function Committee() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker: ticker.toUpperCase() }),
       });
-      const data = await response.json();
-      setSessionData(data);
-
-      // Simulate Act 1
-      const act1Messages = data.act1.map((p: any) => ({
-        type: 'ACT1',
-        persona: p.persona,
-        content: p.read,
-        score: p.score,
-        concern: p.concern,
-        timestamp: new Date().toISOString()
-      }));
-
-      // Add messages one by one with delay
-      for (const msg of act1Messages) {
-        setMessages(prev => [...prev, msg]);
-        await new Promise(r => setTimeout(r, 600));
-      }
-
-      setSessionState('ACT2');
+      const data = (await response.json()) as CommitteeResponse;
       
-      // Simulate Act 2
-      const act2Messages = data.debate.map((d: any) => ({
-        type: 'ACT2',
-        from: d.from,
-        to: d.to,
-        content: d.message,
-        timestamp: new Date().toISOString()
-      }));
-
-      for (const msg of act2Messages) {
-        setMessages(prev => [...prev, msg]);
-        await new Promise(r => setTimeout(r, 800));
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      if (!data.final) {
+        throw new Error('Committee response missing final report');
       }
 
-      setSessionState('ACT3');
-
-      // Final Results
-      setMessages(prev => [...prev, {
-        type: 'ACT3',
-        data: data.final,
-        timestamp: new Date().toISOString()
-      }]);
-
+      setReport(data.final);
       setSessionState('COMPLETE');
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(error);
-      setMessages(prev => [...prev, { type: 'ERROR', content: 'Session sync failure. Check connection.' }]);
+      setError(error instanceof Error ? error.message : 'Session sync failure. Check connection.');
+      setSessionState('IDLE');
     } finally {
       setIsSearching(false);
     }
   };
 
   const handleCommit = () => {
-    if (!sessionData) return;
-    const { final } = sessionData;
+    if (!report) return;
+    // Map categories to verdicts
+    const verdictMap: Record<CommitteeReport['category'], Verdict> = {
+      BUY: 'BUY',
+      ADD: 'ADD',
+      HOLD: 'HOLD',
+      TRIM: 'TRIM',
+      SELL: 'SELL',
+      WATCH: 'WATCH',
+    };
+    
     addSession({
       id: Math.random().toString(36).substr(2, 9),
       ticker: ticker.toUpperCase(),
       date: new Date().toISOString().split('T')[0],
-      verdict: final.verdict as Verdict,
-      convictionScore: final.convictionScore,
-      summary: final.summary,
-      personaScores: final.finalScores,
+      verdict: verdictMap[report.category],
+      convictionScore: report.category === 'BUY' || report.category === 'SELL' ? 8 : 6,
+      summary: report.market_implication,
+      personaScores: { M: 0, H: 0, C: 0, Mi: 0, Ca: 0 },
       outcome: 'PENDING' as Outcome,
       outcomeText: '',
-      fullTranscript: sessionData
+      fullTranscript: report
     });
     alert("Session committed to Research Archive.");
     setSessionState('IDLE');
     setTicker("");
-    setMessages([]);
+    setReport(null);
   };
 
   return (
@@ -126,8 +92,8 @@ export default function Committee() {
       {/* Header */}
       <header className="mb-6 flex justify-between items-end border-b border-border pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-primary tracking-tighter uppercase italic">COMMITTEE ROOM</h1>
-          <p className="text-[10px] uppercase tracking-widest font-bold opacity-60">THREE-ACT ADVERSARIAL DEBATE — ADAPTIVE ALPHA HUNT</p>
+          <h1 className="text-2xl font-bold text-primary tracking-tighter uppercase italic">AI ANALYST ROOM</h1>
+          <p className="text-[10px] uppercase tracking-widest font-bold opacity-60">MICHA.STOCKS AI-ERA FUNDAMENTAL ANALYSIS</p>
         </div>
         {sessionState === 'COMPLETE' && (
            <Button 
@@ -141,7 +107,7 @@ export default function Committee() {
 
       {/* Main Content */}
       <div className="flex-1 flex gap-6 overflow-hidden">
-        {/* Left: Input & Personas */}
+        {/* Left: Input */}
         <div className="w-80 flex flex-col gap-4">
           <Card className="rounded-none bg-muted/5 border-border terminal-border">
             <CardContent className="p-4 space-y-4">
@@ -155,12 +121,12 @@ export default function Committee() {
                        onChange={(e) => setTicker(e.target.value)}
                        placeholder="NVDA, AAPL..."
                        className="bg-background/50 border-border rounded-none pl-8 h-9 text-foreground italic focus-visible:ring-0"
-                       disabled={sessionState !== 'IDLE' && sessionState !== 'COMPLETE'}
+                       disabled={sessionState === 'ANALYZING'}
                      />
                    </div>
                    <Button 
                      onClick={startSession}
-                     disabled={!ticker || (sessionState !== 'IDLE' && sessionState !== 'COMPLETE')}
+                     disabled={!ticker || sessionState === 'ANALYZING'}
                      className="rounded-none bg-primary text-black font-bold h-9 px-4 disabled:opacity-50"
                    >
                      {isSearching ? <Loader2 className="animate-spin" size={14} /> : "START"}
@@ -169,189 +135,203 @@ export default function Committee() {
                </div>
 
                <div className="pt-4 border-t border-border/10 space-y-3">
-                 <h3 className="text-[10px] font-bold text-muted-foreground uppercase">Committee Members</h3>
-                 {PERSONAS.map(p => (
-                   <div key={p.key} className="group cursor-default">
-                     <div className="flex items-center gap-2 mb-1">
-                       <span 
-                         className="w-6 h-6 flex items-center justify-center font-bold text-[10px] border"
-                         style={{ color: p.color, borderColor: `${p.color}44`, backgroundColor: `${p.color}11` }}
-                       >
-                         {p.key}
-                       </span>
-                       <span className="text-[11px] font-bold text-foreground/80">{p.name}</span>
-                       <span className="text-[8px] opacity-40 uppercase ml-auto">{p.role}</span>
-                     </div>
-                     <p className="text-[9px] leading-tight opacity-40 group-hover:opacity-70 transition-opacity">{p.lens}</p>
-                   </div>
-                 ))}
+                 <h3 className="text-[10px] font-bold text-muted-foreground uppercase">Operating Procedure</h3>
+                 <ul className="text-[10px] space-y-2 opacity-60">
+                   <li>1. Fetch 26+ KPI Evidence</li>
+                   <li>2. Build Four Dashboards</li>
+                   <li>3. Interpret Signal Conflicts</li>
+                   <li>4. Model Bull/Bear Scenarios</li>
+                   <li>5. Issue Disciplined Category</li>
+                 </ul>
                </div>
             </CardContent>
           </Card>
           
           <div className="mt-auto p-4 bg-muted/5 border border-border/30 italic text-[10px] text-muted-foreground/50 leading-relaxed terminal-border">
-            Note: Act 1 is independent verdicts. Act 2 is adversarial debate. Act 3 is risk-gated decision.
+            Note: This analysis evaluates business health and theoretical valuation at the current point in time. It does not provide market timing.
           </div>
         </div>
 
         {/* Right: Message Stream */}
         <div className="flex-1 flex flex-col bg-[#0d0d14] border border-border terminal-border overflow-hidden relative">
-          {sessionState === 'IDLE' && (
+          {sessionState === 'IDLE' && !error && (
             <div className="flex-1 flex flex-col items-center justify-center space-y-4 opacity-20">
                <Sparkles className="w-12 h-12 text-primary" />
                <p className="text-[12px] uppercase tracking-widest text-center max-w-xs">
-                 Enter a ticker symbols to convene the specialists.
+                 Enter a ticker symbol to begin fundamental analysis.
                </p>
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-             <AnimatePresence>
-               {messages.map((msg, i) => (
-                 <motion.div
-                   key={i}
-                   initial={{ opacity: 0, x: -10 }}
-                   animate={{ opacity: 1, x: 0 }}
-                   transition={{ duration: 0.4 }}
-                 >
-                   {msg.type === 'ACT1' && (
-                     <div className="flex gap-4 group">
-                       <div className="shrink-0 flex flex-col items-center gap-2">
-                         <div 
-                           className="w-10 h-10 flex items-center justify-center font-bold text-xl border-2"
-                           style={{ color: PERSONAS.find(p => p.name === msg.persona)?.color, borderColor: `${PERSONAS.find(p => p.name === msg.persona)?.color}44` }}
-                         >
-                           {PERSONAS.find(p => p.name === msg.persona)?.key}
-                         </div>
-                         <div className="text-[10px] font-bold opacity-60">
-                           {msg.score.toFixed(1)}
-                         </div>
-                       </div>
-                       <div className="flex-1 space-y-3">
-                         <div className="flex items-center gap-2">
-                           <span className="text-[10px] font-bold text-foreground">ACT 1: INITIAL VERDICT — {msg.persona}</span>
-                           <span className="text-[8px] opacity-20">{msg.timestamp.split('T')[1].split('.')[0]}</span>
-                         </div>
-                         <p className="text-[12px] leading-relaxed text-foreground/90 bg-muted/5 p-3 italic border-l border-border/40">
-                           "{msg.content}"
-                         </p>
-                         <div className="flex items-center gap-2 text-negative/80 bg-negative/5 p-2 px-3 border border-negative/10">
-                            <AlertTriangle size={12} className="shrink-0" />
-                            <span className="text-[10px] uppercase font-bold tracking-tight">Concern: {msg.concern}</span>
-                         </div>
-                       </div>
-                     </div>
-                   )}
+          {sessionState === 'ANALYZING' && (
+            <div className="flex-1 flex flex-col items-center justify-center space-y-4">
+               <Loader2 className="animate-spin w-12 h-12 text-primary" />
+               <p className="text-[12px] uppercase tracking-widest text-center animate-pulse text-primary">
+                 Synthesizing evidence...
+               </p>
+            </div>
+          )}
 
-                   {msg.type === 'ACT2' && (
-                      <div className="flex gap-4 bg-muted/5 p-4 border-l-2 border-primary/20 relative">
-                        <div className="absolute -left-1 top-0 w-2 h-2 bg-primary rounded-full shadow-[0_0_8px_rgba(245,197,24,0.5)]" />
-                        <div className="flex-1 space-y-2">
-                          <div className="flex items-center gap-2">
-                             <div className="flex items-center gap-1">
-                               <span 
-                                 className="w-5 h-5 flex items-center justify-center text-[9px] font-bold border"
-                                 style={{ color: PERSONAS.find(p => p.name === msg.from)?.color, borderColor: `${PERSONAS.find(p => p.name === msg.from)?.color}33` }}
-                               >
-                                 {PERSONAS.find(p => p.name === msg.from)?.key}
-                               </span>
-                               <ChevronRight size={12} />
-                               <span 
-                                 className="w-5 h-5 flex items-center justify-center text-[9px] font-bold border"
-                                 style={{ color: PERSONAS.find(p => p.name === msg.to)?.color, borderColor: `${PERSONAS.find(p => p.name === msg.to)?.color}33` }}
-                               >
-                                 {PERSONAS.find(p => p.name === msg.to)?.key}
-                               </span>
-                             </div>
-                             <span className="text-[10px] font-bold uppercase tracking-widest text-primary italic">Act 2: Cross-Examination</span>
-                          </div>
-                          <p className="text-[11px] leading-relaxed text-foreground/80 pl-2">
-                             {msg.content}
-                          </p>
+          {error && (
+             <div className="m-6 p-4 bg-red-500/10 border border-red-500/30 text-red-500 text-[11px] flex gap-2">
+                <AlertTriangle size={14} /> {error}
+             </div>
+          )}
+
+          {sessionState === 'COMPLETE' && report && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-8 scrollbar-hide">
+              <AnimatePresence>
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4 }}
+                  className="space-y-6"
+                >
+                  <div className="border-b-2 border-primary pb-4">
+                    <h2 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Recommendation</h2>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-2xl font-bold uppercase ${
+                        report.category.includes('BUY') ? 'text-green-500' :
+                        report.category.includes('SELL') ? 'text-red-500' :
+                        'text-amber-500'
+                      }`}>
+                        {report.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-[12px] font-bold text-primary uppercase">Market Implication</h3>
+                    <p className="text-sm text-foreground/90 bg-muted/5 p-4 border-l border-primary/40 leading-relaxed">
+                      {report.market_implication}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="rounded-none bg-[#0a0a0f] border-border p-4">
+                      <h4 className="text-[10px] font-bold uppercase text-primary mb-2">Income Statement Snapshot</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] text-positive uppercase">Evidence:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.income_statement.evidence.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-negative uppercase">Risk:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.income_statement.risk.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
                         </div>
                       </div>
-                   )}
+                    </Card>
 
-                   {msg.type === 'ACT3' && (
-                     <div className="space-y-6 pt-4 border-t-2 border-primary animate-in fade-in slide-in-from-bottom-4 duration-1000">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 bg-primary text-black flex items-center justify-center">
-                                <ShieldCheck size={24} />
-                             </div>
-                             <div>
-                                <h3 className="text-[14px] font-bold text-foreground tracking-tighter uppercase italic">ACT 3: FINAL VERDICT & RISK GATE</h3>
-                                <div className="flex items-center gap-2">
-                                  <Badge className={`rounded-none bg-transparent border uppercase text-[9px] ${
-                                    msg.data.verdict === 'BUY' ? 'border-green-500 text-green-500' :
-                                    msg.data.verdict === 'SELL' ? 'border-red-500 text-red-500' :
-                                    'border-amber-500 text-amber-500'
-                                  }`}>
-                                    {msg.data.verdict}
-                                  </Badge>
-                                  <span className="text-[12px] font-bold text-foreground">Conviction: {msg.data.convictionScore.toFixed(1)} / 10</span>
-                                </div>
-                             </div>
-                          </div>
-                          <div className="flex gap-1">
-                             {PERSONAS.map(p => (
-                               <div key={p.key} className="flex flex-col items-center">
-                                  <span className="text-[8px] opacity-40 font-bold">{p.key}</span>
-                                  <span className="text-[11px] font-bold" style={{ color: p.color }}>{msg.data.finalScores[p.key]}</span>
-                               </div>
-                             ))}
-                          </div>
+                    <Card className="rounded-none bg-[#0a0a0f] border-border p-4">
+                      <h4 className="text-[10px] font-bold uppercase text-primary mb-2">Momentum</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] text-positive uppercase">Evidence:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.momentum.evidence.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
                         </div>
-
-                        <Card className="rounded-none border-primary/30 bg-primary/5 p-4 border shadow-[0_0_20px_rgba(245,197,24,0.05)]">
-                           <p className="text-[13px] leading-relaxed font-bold text-foreground">
-                              {msg.data.summary}
-                           </p>
-                        </Card>
-
-                        <div className="grid grid-cols-3 gap-4">
-                           <div className="p-3 border border-border/50 bg-black/40">
-                              <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Entry Playbook</span>
-                              <span className="text-[11px] font-bold text-foreground">{msg.data.riskPlaybook.entry}</span>
-                           </div>
-                           <div className="p-3 border border-border/50 bg-black/40 border-l-negative/30">
-                              <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Hard Stop</span>
-                              <span className="text-[11px] font-bold text-negative">{msg.data.riskPlaybook.stop}</span>
-                           </div>
-                           <div className="p-3 border border-border/50 bg-black/40">
-                              <span className="text-[9px] font-bold text-muted-foreground uppercase block mb-1">Primary Target</span>
-                              <span className="text-[11px] font-bold text-positive">{msg.data.riskPlaybook.target}</span>
-                           </div>
+                        <div>
+                          <span className="text-[10px] text-negative uppercase">Risk:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.momentum.risk.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
                         </div>
-                        
-                        <div className="p-4 bg-[#1a1a24] border border-border border-l-4 border-l-primary flex gap-3">
-                           <MessageSquare className="text-primary shrink-0 w-4 h-4" />
-                           <p className="text-[11px] italic leading-tight text-foreground/90">
-                              CEO Directive: {msg.data.recommendation}
-                           </p>
-                        </div>
-                     </div>
-                   )}
+                      </div>
+                    </Card>
 
-                   {msg.type === 'ERROR' && (
-                     <div className="p-4 bg-red-500/10 border border-red-500/30 text-red-500 text-[11px] flex gap-2">
-                        <AlertTriangle size={14} /> {msg.content}
-                     </div>
-                   )}
-                 </motion.div>
-               ))}
-             </AnimatePresence>
-             <div ref={chatEndRef} />
-          </div>
+                    <Card className="rounded-none bg-[#0a0a0f] border-border p-4">
+                      <h4 className="text-[10px] font-bold uppercase text-primary mb-2">Valuation History</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] text-positive uppercase">Evidence:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.valuation.evidence.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-negative uppercase">Risk:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.valuation.risk.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
+                        </div>
+                      </div>
+                    </Card>
+
+                    <Card className="rounded-none bg-[#0a0a0f] border-border p-4">
+                      <h4 className="text-[10px] font-bold uppercase text-primary mb-2">Capital Allocation</h4>
+                      <div className="space-y-2">
+                        <div>
+                          <span className="text-[10px] text-positive uppercase">Evidence:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.capital_allocation.evidence.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-negative uppercase">Risk:</span>
+                          <ul className="list-disc pl-4 text-xs text-foreground/80">
+                            {report.dashboards.capital_allocation.risk.map((e: string, i: number) => <li key={i}>{e}</li>)}
+                          </ul>
+                        </div>
+                      </div>
+                    </Card>
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="text-[12px] font-bold text-primary uppercase">Data Triggers</h3>
+                    <ul className="list-none space-y-1">
+                      {report.data_triggers.map((t: string, i: number) => (
+                         <li key={i} className="flex gap-2 items-start text-sm text-foreground/90">
+                           <ArrowRight className="w-4 h-4 mt-0.5 text-primary shrink-0" />
+                           {t}
+                         </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="rounded-none border-green-500/30 bg-green-500/5 p-4 space-y-3">
+                       <h3 className="text-[12px] font-bold text-green-500 uppercase">3-Year Bull Case</h3>
+                       <ul className="list-disc pl-4 text-xs text-foreground/80 space-y-1">
+                         {report.bull_case.map((t: string, i: number) => <li key={i}>{t}</li>)}
+                       </ul>
+                    </Card>
+                    <Card className="rounded-none border-red-500/30 bg-red-500/5 p-4 space-y-3">
+                       <h3 className="text-[12px] font-bold text-red-500 uppercase">3-Year Bear Case</h3>
+                       <ul className="list-disc pl-4 text-xs text-foreground/80 space-y-1">
+                         {report.bear_case.map((t: string, i: number) => <li key={i}>{t}</li>)}
+                       </ul>
+                    </Card>
+                  </div>
+
+                  <div className="space-y-4 pt-4 border-t border-border">
+                    <h3 className="text-[12px] font-bold text-amber-500 uppercase">Invalidation Conditions</h3>
+                    <ul className="list-none space-y-1">
+                      {report.invalidation_conditions.map((t: string, i: number) => (
+                         <li key={i} className="flex gap-2 items-start text-sm text-amber-500/80">
+                           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                           {t}
+                         </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          )}
 
           {/* Activity Bar */}
-          <div className="h-6 bg-muted/10 border-t border-border px-4 flex items-center justify-between text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+          <div className="h-6 bg-muted/10 border-t border-border px-4 flex items-center justify-between text-[9px] font-bold tracking-widest text-muted-foreground uppercase shrink-0">
              <div className="flex items-center gap-4">
                 <span className="flex items-center gap-1">
-                   <div className={`w-1.5 h-1.5 rounded-full ${isSearching ? 'bg-primary animate-ping' : 'bg-green-500'}`} />
-                   Committee: {isSearching ? 'Engaged' : 'Standby'}
+                   <div className={`w-1.5 h-1.5 rounded-full ${sessionState === 'ANALYZING' ? 'bg-primary animate-ping' : 'bg-green-500'}`} />
+                   Agent: {sessionState === 'ANALYZING' ? 'Generating Analysis' : 'Standby'}
                 </span>
-                <span>Buffer: {messages.length} pkts</span>
              </div>
              <div>
                 Phase: {sessionState}

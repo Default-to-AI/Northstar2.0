@@ -11,8 +11,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import Papa from 'papaparse';
+
+type CsvRow = Record<string, string | number | null | undefined>;
 import { Position } from '../types';
 import { fetchSector } from '../lib/finnhub';
+
+function toCellString(value: string | number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).trim();
+}
 
 interface CsvImportDialogProps {
   open: boolean;
@@ -25,7 +34,7 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
   const [csvText, setCsvText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<any[]>([]);
+  const [preview, setPreview] = useState<CsvRow[]>([]);
   const [mode, setMode] = useState<'FILE' | 'TEXT'>('FILE');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -35,7 +44,7 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
       setCsvText("");
       setError(null);
       
-      Papa.parse(selectedFile, {
+      Papa.parse<CsvRow>(selectedFile, {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
@@ -55,7 +64,7 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
     setError(null);
 
     if (text.trim()) {
-      Papa.parse(text, {
+      Papa.parse<CsvRow>(text, {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
@@ -74,19 +83,19 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
     setError(null);
 
     const parseSource = file || csvText;
-    Papa.parse(parseSource as any, {
+    Papa.parse<CsvRow>(parseSource, {
       header: true,
       skipEmptyLines: true,
       complete: async (results) => {
         try {
-          const rawData = results.data as any[];
+          const rawData = results.data;
           const newPositions: Position[] = [];
 
           for (const row of rawData) {
-            const ticker = row.Ticker || row.ticker || row.symbol || row.Symbol;
-            const shares = parseFloat(row.shares || row.Shares || row.quantity || row.Quantity || row.qty);
-            const avgCost = parseFloat(row['avg position price'] || row['Avg Price'] || row.avgPrice || row['avg cost'] || row.avgCost);
-            const lastPrice = parseFloat(row['last price'] || row['Last Price'] || row.lastPrice);
+            const ticker = toCellString(row.Ticker ?? row.ticker ?? row.symbol ?? row.Symbol).toUpperCase();
+            const shares = parseFloat(toCellString(row.shares ?? row.Shares ?? row.quantity ?? row.Quantity ?? row.qty));
+            const avgCost = parseFloat(toCellString(row['avg position price'] ?? row['Avg Price'] ?? row.avgPrice ?? row['avg cost'] ?? row.avgCost));
+            const lastPrice = parseFloat(toCellString(row['last price'] ?? row['Last Price'] ?? row.lastPrice));
             
             if (!ticker || isNaN(shares) || isNaN(avgCost)) {
               console.warn('Skipping invalid row:', row);
@@ -94,11 +103,11 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
             }
 
             // Fetch sector for each stock
-            const sector = await fetchSector(ticker.toUpperCase());
+            const sector = await fetchSector(ticker);
 
             newPositions.push({
               id: Math.random().toString(36).substr(2, 9),
-              ticker: ticker.toUpperCase(),
+              ticker,
               shares,
               avgCost,
               currentPrice: isNaN(lastPrice) ? undefined : lastPrice,
@@ -209,8 +218,8 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
                     <tbody>
                       {preview.map((row, i) => (
                         <tr key={i} className="border-b border-border/10 last:border-0">
-                          {Object.values(row).map((v: any, j) => (
-                            <td key={j} className="p-2 text-foreground/80">{v}</td>
+                          {Object.values(row).map((v, j) => (
+                            <td key={j} className="p-2 text-foreground/80">{String(v ?? '')}</td>
                           ))}
                         </tr>
                       ))}
@@ -232,7 +241,7 @@ export function CsvImportDialog({ open, onOpenChange, onImport }: CsvImportDialo
           </Button>
           <Button 
             onClick={handleImport}
-            disabled={!file || loading}
+            disabled={(!file && !csvText.trim()) || loading}
             className="rounded-none bg-primary text-black font-bold uppercase tracking-widest text-[11px] h-10 px-8 disabled:opacity-50"
           >
             {loading ? (

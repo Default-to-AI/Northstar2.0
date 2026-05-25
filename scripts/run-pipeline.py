@@ -1,57 +1,43 @@
-import sqlite3
-import os
-import datetime
+from __future__ import annotations
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'northstar.db')
+import datetime as dt
 
-def init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pipeline_name TEXT NOT NULL,
-            started_at DATETIME NOT NULL,
-            completed_at DATETIME,
-            status TEXT NOT NULL,
-            error_message TEXT
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS ticker_evidence (
-            ticker TEXT PRIMARY KEY,
-            market_cap REAL,
-            trailing_pe REAL,
-            forward_pe REAL,
-            price_to_book REAL,
-            profit_margins REAL,
-            revenue_growth REAL,
-            fifty_day_ma REAL,
-            two_hundred_day_ma REAL,
-            fifty_two_week_high REAL,
-            fifty_two_week_low REAL,
-            current_price REAL,
-            last_updated DATETIME,
-            free_cashflow REAL,
-            free_cashflow_margin REAL,
-            free_cashflow_yield REAL
-        )
-    ''')
-    conn.commit()
-    return conn
+from research_engine.db import connect
+from research_engine.migrations import migrate
 
-def record_pipeline_run():
-    conn = init_db()
-    cursor = conn.cursor()
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    cursor.execute('''
-        INSERT INTO runs (pipeline_name, started_at, completed_at, status, error_message)
-        VALUES (?, ?, ?, ?, ?)
-    ''', ('pre-open-pipeline', now, now, 'success', None))
-    conn.commit()
-    print(f"Recorded successful pipeline run at {now}")
-    conn.close()
 
-if __name__ == '__main__':
+PIPELINE_NAME = "pre-open-pipeline"
+
+
+def record_pipeline_run() -> int:
+    """Initialize the research DB and record a scheduler-safe pipeline lifecycle row."""
+    conn = connect()
+    try:
+        migrate(conn)
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        with conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO pipeline_runs (pipeline_name, started_at, completed_at, trigger, status, error_summary)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (PIPELINE_NAME, now, now, "manual", "ready", None),
+            )
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to record pipeline run")
+            pipeline_run_id = int(cursor.lastrowid)
+            conn.execute(
+                """
+                INSERT INTO source_runs (pipeline_run_id, source_name, tier, started_at, completed_at, data_as_of, status, retry_count, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (pipeline_run_id, "manual-initialization", "core", now, now, now, "ready", 0, None),
+            )
+        print(f"Recorded ready pipeline run {pipeline_run_id} at {now}")
+        return pipeline_run_id
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
     record_pipeline_run()

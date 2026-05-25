@@ -35,6 +35,8 @@ export default function Profile() {
     }
   };
 
+  type Psychology = typeof profile.psychology;
+
   const computedVixRule = profile.maxPositionSize * (1 - (profile.positionSizeReduction / 100));
 
   const handleSliderChange = (field: keyof typeof profile) => (values: number[]) => {
@@ -197,7 +199,7 @@ export default function Profile() {
                 <label className="label-text text-[9px]">Investor Psychology</label>
                 <Select 
                   value={profile.psychology} 
-                  onValueChange={(v: any) => updateProfile({ psychology: v })}
+                  onValueChange={(v: Psychology) => updateProfile({psychology: v})}
                 >
                   <SelectTrigger className="rounded-none border-border bg-background font-mono focus:ring-0 focus:ring-offset-0 h-8 text-xs">
                     <SelectValue />

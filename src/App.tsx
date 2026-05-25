@@ -88,17 +88,9 @@ export default function App() {
                 <PipelineReadinessIndicator />
               </div>
               <div className="flex items-center gap-3">
-                {import.meta.env.VITE_FINNHUB_KEY && 
-                 import.meta.env.VITE_FINNHUB_KEY !== 'YOUR_FINNHUB_API_KEY' && 
-                 import.meta.env.VITE_FINNHUB_KEY !== 'MY_VITE_FINNHUB_KEY' ? (
-                  <Badge variant="outline" className="bg-emerald-500 text-white border-none text-[9px] font-mono rounded-none px-2 py-0 font-semibold uppercase">
-                    LIVE API MODE
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="bg-primary text-primary-foreground border-none text-[9px] font-mono rounded-none px-2 py-0 font-bold uppercase">
-                    MANUAL DATA MODE
-                  </Badge>
-                )}
+                <Badge variant="outline" className="bg-primary text-primary-foreground border-none text-[9px] font-mono rounded-none px-2 py-0 font-bold uppercase">
+                  SERVER DATA MODE
+                </Badge>
                 <div className="w-2 h-2 rounded-full bg-positive animate-pulse" />
               </div>
             </header>

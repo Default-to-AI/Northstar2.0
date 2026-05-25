@@ -1,0 +1,216 @@
+from __future__ import annotations
+
+import sqlite3
+
+SCHEMA_VERSION = 1
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Apply idempotent V1 research-store migrations without destructive drops."""
+    with conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pipeline_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_name TEXT NOT NULL,
+                scheduled_at TEXT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                trigger TEXT NOT NULL DEFAULT 'manual',
+                status TEXT NOT NULL CHECK(status IN ('started','ready','degraded','failed','superseded','success')),
+                last_good_run_id INTEGER,
+                error_summary TEXT,
+                FOREIGN KEY(last_good_run_id) REFERENCES pipeline_runs(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS source_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pipeline_run_id INTEGER NOT NULL,
+                source_name TEXT NOT NULL,
+                tier TEXT NOT NULL DEFAULT 'core',
+                started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT,
+                data_as_of TEXT,
+                status TEXT NOT NULL CHECK(status IN ('started','ready','degraded','failed','skipped','success')),
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS securities (
+                ticker TEXT PRIMARY KEY,
+                name TEXT,
+                type TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                exchange TEXT,
+                sector TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS security_identifiers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                identifier TEXT NOT NULL,
+                UNIQUE(provider, identifier),
+                FOREIGN KEY(ticker) REFERENCES securities(ticker)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS universe_memberships (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                universe TEXT NOT NULL,
+                as_of_date TEXT NOT NULL,
+                source TEXT NOT NULL,
+                UNIQUE(ticker, universe, as_of_date),
+                FOREIGN KEY(ticker) REFERENCES securities(ticker)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_prices (
+                ticker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                source TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL, adjusted_close REAL, volume REAL,
+                pipeline_run_id INTEGER, source_run_id INTEGER,
+                PRIMARY KEY (ticker, date, source),
+                FOREIGN KEY(ticker) REFERENCES securities(ticker),
+                FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+                FOREIGN KEY(source_run_id) REFERENCES source_runs(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS fundamentals (
+                ticker TEXT PRIMARY KEY,
+                data_as_of TEXT,
+                source TEXT NOT NULL,
+                confidence REAL NOT NULL DEFAULT 0.7,
+                missing_reason TEXT,
+                pipeline_run_id INTEGER, source_run_id INTEGER,
+                market_cap REAL, trailing_pe REAL, forward_pe REAL, price_to_book REAL,
+                price_to_sales REAL, ev_to_ebitda REAL, ev_to_gross_profit REAL, peg_ratio REAL,
+                free_cashflow REAL, operating_cash_flow REAL, gross_margin REAL, operating_margin REAL,
+                profit_margins REAL, revenue_growth REAL, eps REAL, ebitda REAL, diluted_net_income REAL,
+                debt_to_equity REAL, net_cash REAL, current_ratio REAL, roe REAL, roic REAL,
+                revenue_per_employee REAL, fifty_day_ma REAL, two_hundred_day_ma REAL,
+                fifty_two_week_high REAL, fifty_two_week_low REAL, current_price REAL,
+                momentum_history TEXT, valuation_history TEXT,
+                FOREIGN KEY(ticker) REFERENCES securities(ticker),
+                FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+                FOREIGN KEY(source_run_id) REFERENCES source_runs(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS factor_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                pipeline_run_id INTEGER,
+                source_run_id INTEGER,
+                model_id TEXT NOT NULL,
+                data_as_of TEXT,
+                factors_json TEXT NOT NULL,
+                reasons_json TEXT NOT NULL,
+                coverage_json TEXT NOT NULL,
+                missing_data_json TEXT NOT NULL,
+                actionable INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(ticker) REFERENCES securities(ticker),
+                FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+                FOREIGN KEY(source_run_id) REFERENCES source_runs(id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS score_model_versions (
+                model_id TEXT PRIMARY KEY,
+                version TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS score_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                pipeline_run_id INTEGER,
+                factor_snapshot_id INTEGER,
+                score_model_id TEXT NOT NULL DEFAULT 'v1',
+                compounder_score REAL, tactical_score REAL,
+                actionability_state TEXT NOT NULL DEFAULT 'blocked_core_stale',
+                warnings TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(ticker) REFERENCES securities(ticker),
+                FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+                FOREIGN KEY(factor_snapshot_id) REFERENCES factor_snapshots(id),
+                FOREIGN KEY(score_model_id) REFERENCES score_model_versions(model_id)
+            )
+        """)
+        _ensure_columns(conn)
+        _backfill_legacy(conn)
+        conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    """Return column names for an existing SQLite table."""
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    """Add a nullable/defaulted column to tolerate earlier partial V1 schemas."""
+    if column_name not in _table_columns(conn, table_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Upgrade partial tables created by earlier Slice 1-3 attempts."""
+    if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='pipeline_runs'").fetchone():
+        _add_column_if_missing(conn, "pipeline_runs", "scheduled_at", "TEXT")
+        _add_column_if_missing(conn, "pipeline_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'")
+        _add_column_if_missing(conn, "pipeline_runs", "last_good_run_id", "INTEGER")
+        _add_column_if_missing(conn, "pipeline_runs", "error_summary", "TEXT")
+
+    if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='source_runs'").fetchone():
+        _add_column_if_missing(conn, "source_runs", "tier", "TEXT NOT NULL DEFAULT 'core'")
+        _add_column_if_missing(conn, "source_runs", "started_at", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP")
+        _add_column_if_missing(conn, "source_runs", "completed_at", "TEXT")
+        _add_column_if_missing(conn, "source_runs", "retry_count", "INTEGER NOT NULL DEFAULT 0")
+
+    if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fundamentals'").fetchone():
+        _add_column_if_missing(conn, "fundamentals", "confidence", "REAL NOT NULL DEFAULT 0.7")
+        _add_column_if_missing(conn, "fundamentals", "missing_reason", "TEXT")
+        _add_column_if_missing(conn, "fundamentals", "pipeline_run_id", "INTEGER")
+        _add_column_if_missing(conn, "fundamentals", "source_run_id", "INTEGER")
+
+    if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='score_snapshots'").fetchone():
+        _add_column_if_missing(conn, "score_snapshots", "factor_snapshot_id", "INTEGER")
+        _add_column_if_missing(conn, "score_snapshots", "score_model_id", "TEXT NOT NULL DEFAULT 'v1'")
+        _add_column_if_missing(conn, "score_snapshots", "actionability_state", "TEXT NOT NULL DEFAULT 'blocked_core_stale'")
+
+
+def _backfill_legacy(conn: sqlite3.Connection) -> None:
+    """Copy legacy ticker_evidence rows into normalized tables when present."""
+    legacy = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ticker_evidence'").fetchone()
+    if legacy is None:
+        return
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(ticker_evidence)")}
+    if "ticker" not in cols:
+        return
+    for row in conn.execute("SELECT * FROM ticker_evidence"):
+        data = dict(row)
+        ticker = str(data.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        now = data.get("last_updated")
+        conn.execute("""
+            INSERT INTO securities (ticker, name, type, active, updated_at) VALUES (?, ?, 'UNKNOWN', 1, COALESCE(?, CURRENT_TIMESTAMP))
+            ON CONFLICT(ticker) DO UPDATE SET updated_at=excluded.updated_at
+        """, (ticker, ticker, now))
+        conn.execute("""
+            INSERT INTO fundamentals (ticker, data_as_of, source, confidence, missing_reason, market_cap, trailing_pe, forward_pe, price_to_book, profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma, fifty_two_week_high, fifty_two_week_low, current_price, free_cashflow)
+            VALUES (?, ?, 'legacy', 0.5, 'legacy_backfill', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker) DO NOTHING
+        """, (ticker, now, data.get("market_cap"), data.get("trailing_pe"), data.get("forward_pe"), data.get("price_to_book"), data.get("profit_margins"), data.get("revenue_growth"), data.get("fifty_day_ma"), data.get("two_hundred_day_ma"), data.get("fifty_two_week_high"), data.get("fifty_two_week_low"), data.get("current_price"), data.get("free_cashflow")))

@@ -15,6 +15,10 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 
+type VerdictFilter = Verdict | 'ALL';
+
+const VERDICT_OPTIONS: VerdictFilter[] = ['ALL', 'BUY', 'ADD', 'HOLD', 'TRIM', 'SELL', 'WATCH'];
+
 const VERDICT_COLORS: Record<Verdict, string> = {
   'BUY': 'bg-green-500/10 text-green-400 border-green-500/20',
   'ADD': 'bg-amber-500/10 text-amber-400 border-amber-500/20',
@@ -41,7 +45,7 @@ const PERSONAS = [
 export default function Archive() {
   const { sessions, updateSession } = useArchive();
   const [search, setSearch] = useState("");
-  const [verdictFilter, setVerdictFilter] = useState<Verdict | "ALL">("ALL");
+  const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('ALL');
   const [minConviction, setMinConviction] = useState([0]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -88,7 +92,7 @@ export default function Archive() {
 
         <div className="space-y-1.5">
           <label className="text-[10px] font-mono text-muted-foreground uppercase font-bold">Verdict</label>
-          <Select value={verdictFilter} onValueChange={(v) => setVerdictFilter(v as any)}>
+          <Select value={verdictFilter} onValueChange={(v) => { if (VERDICT_OPTIONS.includes(v as VerdictFilter)) setVerdictFilter(v as VerdictFilter); }}>
             <SelectTrigger className="h-8 rounded-none border-border bg-background/50 font-mono text-[10px]">
               <SelectValue />
             </SelectTrigger>

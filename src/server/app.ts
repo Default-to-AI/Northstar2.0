@@ -11,7 +11,7 @@ import path from 'path';
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
 import type {IBKRPortfolioSnapshot} from '../types/ibkr';
-import Database from 'better-sqlite3';
+import {openResearchDb} from './research/db.ts';
 
 dotenv.config();
 
@@ -58,6 +58,62 @@ type TickerEvidenceRow = {
   free_cashflow: number | null;
   free_cashflow_margin: number | null;
   free_cashflow_yield: number | null;
+  gross_margin: number | null;
+  operating_margin: number | null;
+  eps: number | null;
+  ebitda: number | null;
+  diluted_net_income: number | null;
+  price_to_sales: number | null;
+  ev_to_ebitda: number | null;
+  ev_to_gross_profit: number | null;
+  peg_ratio: number | null;
+  operating_cash_flow: number | null;
+  debt_to_equity: number | null;
+  net_cash: number | null;
+  current_ratio: number | null;
+  roe: number | null;
+  roic: number | null;
+  revenue_per_employee: number | null;
+  earnings_revisions: string | null;
+  share_buybacks: number | null;
+  insider_transactions: string | null;
+  momentum_history: string | null;
+  valuation_history: string | null;
+  score_snapshot_id: number | null;
+  score_model_id: string | null;
+  actionability_state: string | null;
+  warnings: string | null;
+  compounder_score: number | null;
+  tactical_score: number | null;
+};
+
+type PipelineRunRow = {
+  id: number;
+  pipeline_name: string;
+  started_at: string;
+  completed_at: string | null;
+  status: string;
+  error_summary: string | null;
+};
+
+type SourceRunRow = {
+  source_name: string;
+  tier: string;
+  status: string;
+  data_as_of: string | null;
+  error_message: string | null;
+};
+
+type ScannerRow = {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  strength: number;
+  tacticalStrength: number;
+  signal: 'BULLISH' | 'WATCH' | 'BEARISH';
+  actionabilityState: string;
+  warnings: string | null;
+  scoreModelId: string;
 };
 
 type FinnhubNewsItem = {
@@ -68,6 +124,27 @@ type FinnhubNewsItem = {
 type FinnhubMetricResponse = {
   metric?: Record<string, unknown>;
 };
+
+
+function parseJsonArray(raw: string | null): unknown[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonStringArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
 
 function createAiClient(): GoogleGenAI {
   return new GoogleGenAI({
@@ -94,183 +171,10 @@ function registerApiRoutes(app: Express): void {
         return res.status(400).json({error: 'Ticker is required'});
       }
 
-      try {
-        const act1Params = {
-          model: 'gemini-3-flash-preview',
-          config: {
-            systemInstruction: `You are the chairman of an investment committee. You steer a panel of 5 specialists.
-          Personas:
-          - Mahaney (Technologist): Focus on growth, TAM, category leadership.
-          - Hohn (Activist): Focus on value, governance, normalized earnings.
-          - Cohen (Trader): Focus on risk/reward, catalysts, timing.
-          - Stokes (Trend Follower): Focus on price momentum, 150MA.
-          - Carlson (Compounder): Focus on FCF, moats, dividend growth.
-          
-          TASK: Run ACT 1 of a committee session for ${ticker}. 
-          Each persona MUST provide:
-          1. Their lens-specific read.
-          2. A score 1-10.
-          3. Their biggest concern.
-          
-          Respond in JSON.`,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                act1: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      persona: {type: Type.STRING},
-                      read: {type: Type.STRING},
-                      score: {type: Type.NUMBER},
-                      concern: {type: Type.STRING},
-                    },
-                    required: ['persona', 'read', 'score', 'concern'],
-                  },
-                },
-              },
-            },
-          },
-          contents: `Analyze ${ticker}.`,
-        };
-
-        const act1Response = await ai.models.generateContent(act1Params);
-        const act1Data = JSON.parse(act1Response.text) as {
-          act1: Array<{
-            persona: string;
-            read: string;
-            score: number;
-            concern: string;
-          }>;
-        };
-
-        const act2Params = {
-          model: 'gemini-3-flash-preview',
-          config: {
-            systemInstruction: `You are running ACT 2: DEBATE for ${ticker}.
-          Based on the initial Act 1 scores and concerns, simulate a 3-turn adversarial exchange between personas.
-          Personas can challenge each other's assumptions.
-          
-          Respond in JSON.`,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                debate: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      from: {type: Type.STRING},
-                      to: {type: Type.STRING},
-                      message: {type: Type.STRING},
-                    },
-                    required: ['from', 'to', 'message'],
-                  },
-                },
-              },
-            },
-          },
-          contents: `Act 1 Results: ${JSON.stringify(act1Data)}`,
-        };
-
-        const act2Response = await ai.models.generateContent(act2Params);
-        const act2Data = JSON.parse(act2Response.text) as {
-          debate: Array<{
-            from: string;
-            to: string;
-            message: string;
-          }>;
-        };
-
-        const act3Params = {
-          model: 'gemini-3-flash-preview',
-          config: {
-            systemInstruction: `You are running ACT 3: FINAL VERDICT & RISK GATE for ${ticker}.
-          Synthesize the debate. Provide final scores for each persona (M, H, C, Mi, Ca).
-          Also, as the Risk Officer, provide deterministic constraints (entry, stop, target).
-          The Committee Recommendation should be a summary of the outcome.
-          
-          Respond in JSON.`,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                finalScores: {
-                  type: Type.OBJECT,
-                  properties: {
-                    M: {type: Type.NUMBER},
-                    H: {type: Type.NUMBER},
-                    C: {type: Type.NUMBER},
-                    Mi: {type: Type.NUMBER},
-                    Ca: {type: Type.NUMBER},
-                  },
-                },
-                recommendation: {type: Type.STRING},
-                verdict: {
-                  type: Type.STRING,
-                  enum: ['BUY', 'ADD', 'HOLD', 'TRIM', 'SELL', 'WATCH'],
-                },
-                riskPlaybook: {
-                  type: Type.OBJECT,
-                  properties: {
-                    entry: {type: Type.STRING},
-                    stop: {type: Type.STRING},
-                    target: {type: Type.STRING},
-                  },
-                },
-                summary: {type: Type.STRING},
-              },
-            },
-          },
-          contents: `Debate Log: ${JSON.stringify(act2Data)}`,
-        };
-
-        const act3Response = await ai.models.generateContent(act3Params);
-        const act3Data = JSON.parse(act3Response.text) as {
-          finalScores: {
-            M: number;
-            H: number;
-            C: number;
-            Mi: number;
-            Ca: number;
-          };
-          recommendation: string;
-          verdict: 'BUY' | 'ADD' | 'HOLD' | 'TRIM' | 'SELL' | 'WATCH';
-          riskPlaybook: {
-            entry: string;
-            stop: string;
-            target: string;
-          };
-          summary: string;
-          convictionScore?: number;
-        };
-
-        const {M, H, C, Mi, Ca} = act3Data.finalScores;
-        const fundamentalScore = (M + H) / 2;
-        const macroScore = Ca;
-        const technicalScore = (C + Mi) / 2;
-        const sentimentScore = M;
-
-        const weightedConviction =
-          fundamentalScore * 0.35 +
-          macroScore * 0.25 +
-          technicalScore * 0.2 +
-          sentimentScore * 0.2;
-
-        act3Data.convictionScore = Number(weightedConviction.toFixed(1));
-
-        return res.json({
-          act1: act1Data.act1,
-          debate: act2Data.debate,
-          final: act3Data,
-        });
-      } catch (error) {
-        console.error('Committee error:', error);
-        return res.status(500).json({error: 'Failed to run committee session'});
-      }
+      return res.status(409).json({
+        error:
+          'Legacy ticker-only committee sessions are disabled. Slice 4 must create /api/research/committee/session from a frozen evidence packet before LLM analysis can run.',
+      });
     },
   );
 
@@ -286,53 +190,109 @@ function registerApiRoutes(app: Express): void {
 
   app.get('/api/research/readiness', async (_req: Request, res: Response) => {
     try {
-      const db = new Database(DB_PATH, { fileMustExist: false });
-      
-      // Check if table exists
-      const tableCheck = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'").get();
-      if (!tableCheck) {
-        db.close();
-        return res.json({ status: 'warning', message: 'Pipeline not initialized', sources: [] });
-      }
-
-      const stmt = db.prepare(`
-        SELECT pipeline_name, started_at, completed_at, status, error_message
-        FROM runs
-        ORDER BY completed_at DESC
+      const db = openResearchDb();
+      const row = db.prepare(`
+        SELECT id, pipeline_name, started_at, completed_at, status, error_summary
+        FROM pipeline_runs
+        WHERE completed_at IS NOT NULL AND status IN ('ready', 'degraded', 'success', 'failed')
+        ORDER BY completed_at DESC, id DESC
         LIMIT 1
-      `);
-      const row = stmt.get() as any;
+      `).get() as PipelineRunRow | undefined;
+
+      const sourceRows = row
+        ? db.prepare(`
+            SELECT source_name, tier, status, data_as_of, error_message
+            FROM source_runs
+            WHERE pipeline_run_id = ?
+            ORDER BY tier, source_name
+          `).all(row.id) as SourceRunRow[]
+        : [];
       db.close();
 
       if (!row) {
-        return res.json({ status: 'warning', message: 'No pipeline runs found', sources: [] });
+        return res.json({ status: 'no_data', message: 'No completed pipeline runs found', sources: [] });
       }
 
-      const completedAt = new Date(row.completed_at);
-      const now = new Date();
-      const diffHours = (now.getTime() - completedAt.getTime()) / (1000 * 60 * 60);
+      const completedAt = row.completed_at ? new Date(row.completed_at) : null;
+      const diffHours = completedAt
+        ? (Date.now() - completedAt.getTime()) / (1000 * 60 * 60)
+        : Number.POSITIVE_INFINITY;
 
-      let status = 'fresh';
-      if (row.status !== 'success') {
-        status = 'error';
-      } else if (diffHours > 24) {
-        status = 'stale';
-      }
+      const status = row.status === 'failed'
+        ? 'failed'
+        : diffHours > 24
+          ? 'stale_usable'
+          : row.status === 'degraded'
+            ? 'degraded_partial'
+            : 'fresh_actionable';
 
       return res.json({
         status,
-        sources: [
-          {
-            name: row.pipeline_name,
-            status,
-            timestamp: row.completed_at,
-            error_message: row.error_message,
-          }
-        ]
+        generatedAt: new Date().toISOString(),
+        runId: row.id,
+        dataAsOf: row.completed_at,
+        warnings: row.error_summary ? [row.error_summary] : [],
+        sources: sourceRows.map((source) => ({
+          name: source.source_name,
+          tier: source.tier,
+          status: source.status,
+          timestamp: source.data_as_of,
+          errorMessage: source.error_message,
+        })),
       });
     } catch (error) {
       console.error('Readiness error:', error);
       return res.status(500).json({ error: 'Failed to fetch readiness' });
+    }
+  });
+
+  app.get('/api/research/scanner', (_req: Request, res: Response) => {
+    try {
+      const db = openResearchDb();
+      const rows = db.prepare(`
+        SELECT 
+          s.ticker, s.name, s.sector,
+          ss.compounder_score as strength,
+          ss.tactical_score as tacticalStrength,
+          ss.actionability_state as actionabilityState,
+          ss.warnings,
+          ss.score_model_id as scoreModelId,
+          CASE WHEN ss.actionability_state != 'fresh_actionable' THEN 'WATCH'
+               WHEN ss.compounder_score >= 80 THEN 'BULLISH'
+               WHEN ss.compounder_score >= 60 THEN 'WATCH'
+               ELSE 'BEARISH' END as signal
+        FROM score_snapshots ss
+        JOIN securities s ON ss.ticker = s.ticker
+        WHERE ss.id IN (
+          SELECT MAX(id) FROM score_snapshots GROUP BY ticker
+        )
+        ORDER BY ss.compounder_score DESC
+      `).all() as ScannerRow[];
+      db.close();
+
+      const opportunities = rows.map((row) => ({
+        ticker: row.ticker,
+        name: row.name,
+        sector: row.sector,
+        strength: Math.round(row.strength),
+        tacticalStrength: Math.round(row.tacticalStrength),
+        signal: row.signal,
+        actionabilityState: row.actionabilityState,
+        scoreModelId: row.scoreModelId,
+        warnings: parseJsonStringArray(row.warnings),
+        reason: row.actionabilityState === 'fresh_actionable'
+          ? `Review-ready score from ${row.scoreModelId} model (compounder: ${Math.round(row.strength)}).`
+          : 'Candidate requires review because core score inputs are missing or stale.',
+      }));
+
+      return res.json({
+        generatedAt: new Date().toISOString(),
+        queue: 'compounder',
+        opportunities,
+      });
+    } catch (error) {
+      console.error('Scanner error:', error);
+      return res.status(500).json({ error: 'Failed to fetch scanner queue' });
     }
   });
 
@@ -348,25 +308,28 @@ function registerApiRoutes(app: Express): void {
       }
 
       try {
-        const db = new Database(DB_PATH, {fileMustExist: false});
-
-        const tableCheck = db
-          .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='ticker_evidence'")
-          .get();
-        if (!tableCheck) {
-          db.close();
-          return res.status(404).json({error: 'Evidence table not initialized'});
-        }
-
+        const db = openResearchDb();
         const row = db
           .prepare(
             `
-              SELECT ticker, market_cap, trailing_pe, forward_pe, price_to_book,
-                     profit_margins, revenue_growth, fifty_day_ma, two_hundred_day_ma,
-                     fifty_two_week_high, fifty_two_week_low, current_price, last_updated, free_cashflow,
-                     free_cashflow_margin, free_cashflow_yield
-              FROM ticker_evidence
-              WHERE ticker = ?
+              SELECT s.ticker, f.market_cap, f.trailing_pe, f.forward_pe, f.price_to_book,
+                     f.profit_margins, f.revenue_growth, f.fifty_day_ma, f.two_hundred_day_ma,
+                     f.fifty_two_week_high, f.fifty_two_week_low, f.current_price, f.data_as_of as last_updated, f.free_cashflow,
+                     (f.free_cashflow / (f.market_cap / f.price_to_sales)) as free_cashflow_margin,
+                     (f.free_cashflow / f.market_cap) as free_cashflow_yield,
+                     f.gross_margin, f.operating_margin,
+                     f.eps, f.ebitda, f.diluted_net_income, f.price_to_sales, f.ev_to_ebitda, f.ev_to_gross_profit,
+                     f.peg_ratio, f.operating_cash_flow, f.debt_to_equity, f.net_cash, f.current_ratio,
+                     f.roe, f.roic, f.revenue_per_employee, NULL as earnings_revisions, NULL as share_buybacks,
+                     NULL as insider_transactions, f.momentum_history, f.valuation_history,
+                     ss.id as score_snapshot_id, ss.score_model_id, ss.actionability_state, ss.warnings,
+                     ss.compounder_score, ss.tactical_score
+              FROM securities s
+              JOIN fundamentals f ON s.ticker = f.ticker
+              LEFT JOIN score_snapshots ss ON ss.id = (
+                SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+              )
+              WHERE s.ticker = ?
             `,
           )
           .get(ticker) as TickerEvidenceRow | undefined;
@@ -385,6 +348,10 @@ function registerApiRoutes(app: Express): void {
             trailingPE: row.trailing_pe,
             forwardPE: row.forward_pe,
             priceToBook: row.price_to_book,
+            priceToSales: row.price_to_sales,
+            evToEbitda: row.ev_to_ebitda,
+            evToGrossProfit: row.ev_to_gross_profit,
+            pegRatio: row.peg_ratio,
           },
           fundamentals: {
             profitMargins: row.profit_margins,
@@ -392,6 +359,23 @@ function registerApiRoutes(app: Express): void {
             freeCashflow: row.free_cashflow,
             freeCashflowMargin: row.free_cashflow_margin,
             freeCashflowYield: row.free_cashflow_yield,
+            grossMargin: row.gross_margin,
+            operatingMargin: row.operating_margin,
+            eps: row.eps,
+            ebitda: row.ebitda,
+            dilutedNetIncome: row.diluted_net_income,
+            operatingCashFlow: row.operating_cash_flow,
+          },
+          financialStrength: {
+            debtToEquity: row.debt_to_equity,
+            netCash: row.net_cash,
+            currentRatio: row.current_ratio,
+            roe: row.roe,
+            roic: row.roic,
+            revenuePerEmployee: row.revenue_per_employee,
+            earningsRevisions: row.earnings_revisions,
+            shareBuybacks: row.share_buybacks,
+            insiderTransactions: row.insider_transactions,
           },
           technicals: {
             fiftyDayMA: row.fifty_day_ma,
@@ -399,6 +383,18 @@ function registerApiRoutes(app: Express): void {
             fiftyTwoWeekHigh: row.fifty_two_week_high,
             fiftyTwoWeekLow: row.fifty_two_week_low,
             currentPrice: row.current_price,
+          },
+          history: {
+            momentum: parseJsonArray(row.momentum_history),
+            valuation: parseJsonArray(row.valuation_history),
+          },
+          score: {
+            snapshotId: row.score_snapshot_id,
+            modelId: row.score_model_id,
+            actionabilityState: row.actionability_state,
+            compounderScore: row.compounder_score,
+            tacticalScore: row.tactical_score,
+            warnings: parseJsonStringArray(row.warnings),
           },
           lastUpdated: row.last_updated,
         });
@@ -446,15 +442,16 @@ function registerApiRoutes(app: Express): void {
   );
 
   app.get('/api/news/market', async (_req: Request, res: Response) => {
-    const finnhubKey = process.env.VITE_FINNHUB_KEY;
+    const finnhubKey = process.env.FINNHUB_API_KEY;
     if (!finnhubKey) {
       return res.status(500).json({error: 'Finnhub key missing'});
     }
 
     try {
-      const response = await fetch(
-        `https://finnhub.io/api/v1/news?category=general&token=${encodeURIComponent(finnhubKey)}`,
-      );
+      const url = new URL('https://finnhub.io/api/v1/news');
+      url.searchParams.set('category', 'general');
+      url.searchParams.set('token', finnhubKey);
+      const response = await fetch(url);
       const data = (await response.json()) as FinnhubNewsItem[];
       return res.json(data.slice(0, 10));
     } catch (error) {
@@ -470,7 +467,7 @@ function registerApiRoutes(app: Express): void {
       res: Response,
     ) => {
       const {symbols} = req.query;
-      const finnhubKey = process.env.VITE_FINNHUB_KEY;
+      const finnhubKey = process.env.FINNHUB_API_KEY;
       if (!finnhubKey || !symbols) {
         return res.status(400).json({error: 'Missing parameters'});
       }
@@ -484,9 +481,12 @@ function registerApiRoutes(app: Express): void {
 
         const allNews = await Promise.all(
           tickers.slice(0, 5).map(async (ticker) => {
-            const response = await fetch(
-              `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${weekAgo}&to=${today}&token=${encodeURIComponent(finnhubKey)}`,
-            );
+            const url = new URL('https://finnhub.io/api/v1/company-news');
+            url.searchParams.set('symbol', ticker);
+            url.searchParams.set('from', weekAgo);
+            url.searchParams.set('to', today);
+            url.searchParams.set('token', finnhubKey);
+            const response = await fetch(url);
             const data = (await response.json()) as FinnhubNewsItem[];
 
             return data.slice(0, 3).map((item) => ({
@@ -513,15 +513,17 @@ function registerApiRoutes(app: Express): void {
       res: Response,
     ) => {
       const {symbol} = req.query;
-      const finnhubKey = process.env.VITE_FINNHUB_KEY;
+      const finnhubKey = process.env.FINNHUB_API_KEY;
       if (!finnhubKey || !symbol) {
         return res.status(400).json({error: 'Missing parameters'});
       }
 
       try {
-        const response = await fetch(
-          `https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(symbol)}&metric=all&token=${encodeURIComponent(finnhubKey)}`,
-        );
+        const url = new URL('https://finnhub.io/api/v1/stock/metric');
+        url.searchParams.set('symbol', symbol);
+        url.searchParams.set('metric', 'all');
+        url.searchParams.set('token', finnhubKey);
+        const response = await fetch(url);
         const data = (await response.json()) as FinnhubMetricResponse;
         return res.json(data.metric ?? {});
       } catch (error) {
@@ -669,11 +671,6 @@ const YAHOO_HEADERS: HeadersInit = {
 const IBKR_PORTFOLIO_PATH = path.resolve(
   process.cwd(),
   'data/ibkr-portfolio.json',
-);
-
-const DB_PATH = path.resolve(
-  process.cwd(),
-  'data/northstar.db',
 );
 
 async function loadIbkrPortfolioSnapshot(): Promise<IBKRPortfolioSnapshot | null> {
