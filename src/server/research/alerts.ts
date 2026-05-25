@@ -61,7 +61,15 @@ function upsertGeneratedAlerts(db: Database.Database): void {
     LIMIT 1
   `).get() !== undefined;
 
-  const committeeLineageExistsClause = hasEvidencePacketsTable
+  const hasCommitteeSessionsTable = db.prepare(`
+    SELECT 1
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'committee_sessions'
+    LIMIT 1
+  `).get() !== undefined;
+
+  const committeeLineageExistsClause = hasCommitteeSessionsTable
+    ? (hasEvidencePacketsTable
     ? `
       EXISTS(
         SELECT 1 FROM committee_sessions cs
@@ -84,7 +92,8 @@ function upsertGeneratedAlerts(db: Database.Database): void {
         SELECT 1 FROM committee_sessions cs
         WHERE cs.score_snapshot_id = ss.id
       )
-    `;
+    `)
+    : '0';
 
   const pipelineFailures = db.prepare(`
     SELECT source_name, id as source_run_id, error_message
@@ -95,7 +104,7 @@ function upsertGeneratedAlerts(db: Database.Database): void {
   `).all() as Array<{source_name: string; source_run_id: number; error_message: string | null}>;
 
   const scoreSignals = db.prepare(`
-    SELECT ss.ticker, ss.id as score_snapshot_id, ss.source_run_id, ss.actionability_state, ss.warnings,
+    SELECT ss.ticker, ss.id as score_snapshot_id, ss.pipeline_run_id as source_run_id, ss.actionability_state, ss.warnings,
       ${committeeLineageExistsClause} as has_committee_session
     FROM score_snapshots ss
     WHERE ss.id IN (
