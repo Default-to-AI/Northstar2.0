@@ -11,7 +11,7 @@ The research pipeline is a batch-oriented Python process that collects market da
 ### Record a pipeline lifecycle
 
 ```sh
-python -m scripts.run_pipeline
+python3 -m scripts.run_pipeline
 ```
 
 Records a pipeline run and a core source run as `ready` in the research store. Used during development and scheduling to initialize the pipeline lifecycle tracking.
@@ -22,11 +22,11 @@ Slice 1/2 collectors and scoring jobs are invoked individually:
 
 ```sh
 # Run migrations then collect daily prices
-python -m scripts.research_engine.migrations          # ensure schema
-python -m scripts.research_engine.collect_prices       # daily price collection
-python -m scripts.research_engine.collect_fundamentals # fundamental data
-python -m scripts.research_engine.compute_factors      # factor computation
-python -m scripts.research_engine.score_universe       # scoring pass
+python3 -m scripts.research_engine.migrations          # ensure schema
+python3 -m scripts.research_engine.collect_prices       # daily price collection
+python3 -m scripts.research_engine.collect_fundamentals # fundamental data
+python3 -m scripts.research_engine.compute_factors      # factor computation
+python3 -m scripts.research_engine.score_universe       # scoring pass
 ```
 
 Future: a single orchestrator script (`scripts/research_engine/pipeline.py`) will sequence these steps.
@@ -34,7 +34,7 @@ Future: a single orchestrator script (`scripts/research_engine/pipeline.py`) wil
 ### Outcome tracking
 
 ```sh
-python -m scripts.research_engine.outcomes
+python3 -m scripts.research_engine.outcomes
 ```
 
 Discovers new sources (scanner signals, committee playbooks), seeds `decision_outcomes` rows, and computes forward returns. Idempotent — safe to re-run. See [research-outcomes.md](research-outcomes.md).
@@ -101,7 +101,7 @@ FileNotFoundError: Northstar DB not found: /path/to/data/northstar.db
 
 Run migrations first:
 ```sh
-python -c "from scripts.research_engine.migrations import migrate; from scripts.research_engine.db import connect; migrate(connect())"
+python3 -c "from scripts.research_engine.migrations import migrate; from scripts.research_engine.db import connect; migrate(connect())"
 ```
 
 ### WAL file growth
@@ -123,7 +123,7 @@ Check `research_alerts` table: alerts are deduplicated by `(alert_type, ticker, 
 
 Run outcome job:
 ```sh
-python -m scripts.research_engine.outcomes
+python3 -m scripts.research_engine.outcomes
 ```
 
 The outcome job calls `migrate()` which creates the table if missing.

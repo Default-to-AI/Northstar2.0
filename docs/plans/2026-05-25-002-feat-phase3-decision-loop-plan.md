@@ -97,7 +97,7 @@ The Phase 1 foundation (SQLite store, collectors, scoring) and Phase 2 product s
 
 - Exact alert dedupe window: implement with source-run/score-snapshot IDs as the dedupe key; tune window in testing.
 - Exact trading-calendar rules: use the simplest trading-day-aware approach (skip weekends, US market holidays); formalize in the outcome job.
-- Outcome job trigger: v1 is manual `python -m scripts.research_engine.outcomes`; cron/Hermes scheduling is a follow-up.
+- Outcome job trigger: v1 is manual `python3 -m scripts.research_engine.outcomes`; cron/Hermes scheduling is a follow-up.
 
 ---
 
@@ -279,7 +279,7 @@ flowchart TB
 - Handle: missing benchmark data (record fallback, don't fail), delisted/acquired (terminal outcome state), overlapping outcome windows (most recent data wins)
 - Store manual notes/verdicts separately from quantitative return outcomes
 - Link alert precision: each accepted alert can eventually trace to its outcome
-- Job runs standalone: `python -m scripts.research_engine.outcomes`; reads from the same `NORTHSTAR_DB_PATH`
+- Job runs standalone: `python3 -m scripts.research_engine.outcomes`; reads from the same `NORTHSTAR_DB_PATH`
 - Provide a compact function `compute_latest_outcomes(db_path)` for API consumption — the API server calls this lazily on GET
 
 **Patterns to follow:**

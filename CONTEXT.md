@@ -73,7 +73,7 @@ Needed:
 - Use tiered data readiness: core sources must pass; secondary sources can be stale only with visible warnings.
 - Store score model weights in a versioned config and record score model IDs on every score snapshot.
 - Committee sessions require a frozen evidence packet; ticker-only requests are rejected. LLM output is validated against evidence citations and deterministic risk governance before persistence. Risk config lives in `config/risk-model/v1.json`.
-- Track decision outcomes prospectively: 1w/1m/3m forward returns versus SPY and relevant sectors. Outcome job runs as `python -m scripts.research_engine.outcomes`; idempotent key is `(source_type, source_id, horizon_days)`.
+- Track decision outcomes prospectively: 1w/1m/3m forward returns versus SPY and relevant sectors. Outcome job runs as `python3 -m scripts.research_engine.outcomes`; idempotent key is `(source_type, source_id, horizon_days)`.
 - Default alert policy is conservative: buy-ready setup, risk breach, earnings/filing shock, or data pipeline failure. Alerts deduplicated by `alert_type + ticker + source_run_id + score_snapshot_id`.
 - Keep v1 local/private. No broker execution, public cloud, paid data dependency, options/crypto, or full SaaS auth in v1.
 - All live portfolio formatting goes through `src/services/ibkr/sync.ts` → `data/ibkr-portfolio.json`.

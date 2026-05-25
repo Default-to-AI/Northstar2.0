@@ -78,7 +78,7 @@ This means re-running the job is safe and produces no duplicate outcome records.
 ### CLI
 
 ```sh
-python -m scripts.research_engine.outcomes
+`python3 -m scripts.research_engine.outcomes`
 ```
 
 The job:

@@ -44,7 +44,7 @@ Three interconnected problems needed to be solved:
 
 - The `decision_outcomes` table tracks both signal outcomes (scanner signals) and decision outcomes (committee playbooks).
 - Idempotency is enforced by `UNIQUE(source_type, source_id, horizon_days)` — re-running the outcome job produces zero duplicate rows.
-- The outcome job runs as a standalone Python script (`python -m scripts.research_engine.outcomes`) matching the existing collector/scoring pattern.
+- The outcome job runs as a standalone Python script (`python3 -m scripts.research_engine.outcomes`) matching the existing collector/scoring pattern.
 - Forward returns are computed using trading-day-aware logic (skip weekends, no US holiday calendar in v1), preferring `adjusted_close` with `close` fallback.
 - Benchmark comparison: SPY + sector-specific ETF mapping (XLK, XLF, XLV, etc.). Missing benchmark data is recorded as fallback (non-fatal).
 - The API (`GET /api/research/outcomes`) serves computed outcome records with filtering by source type, status, and ticker.
