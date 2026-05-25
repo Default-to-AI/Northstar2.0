@@ -43,6 +43,7 @@ The Phase 1 foundation (SQLite store, collectors, scoring) and Phase 2 product s
 - Outcome dashboard and alert-precision UI: full chart/table rendering of 1w/1m/3m outcomes and alert stats after the job proves stable.
 - Full WebSocket-based live alert push: v1 alerts are API-polled via TanStack Query; live push follows as an ops concern.
 - Committee prompt-history editor: v1 prompt versioning is code-only; a UI admin panel is deferred.
+- **Historical Fundamentals Dashboard**: Quarterly fundamentals history (4-5 years), collector from yfinance/SEC, time-series API, 14-chart grid UI in Builder IO style. Reference: `/tmp/builder-io-qualtrim-design`. Planned after Slice 5 or as parallel track.
 
 ---
 

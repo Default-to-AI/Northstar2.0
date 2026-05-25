@@ -65,3 +65,17 @@ _Why it serves the approach:_ the product wins by having fresh, prioritized evid
 **One-liner:** Northstar is a market-open research command center that turns free data, portfolio context, and grounded AI debate into disciplined trade playbooks.
 
 **Key message:** It is not a generic portfolio dashboard. It is a research engine: deterministic scanner first, curated watchlist second, evidence-grounded committee last, with outcome tracking closing the loop.
+
+---
+
+## Delivery Roadmap
+
+| # | Slice | Scope | Status |
+|---|-------|-------|--------|
+| 1-2 | Foundation + Evidence | IBKR sync, portfolio dashboard, evidence pipeline, scanner, watchlist | ✅ Done |
+| 3 | Research Engine | SQLite store, collectors, scoring, APIs, command center UI | ✅ Done |
+| 4 | Decision Loop | Grounded committee, risk governance, 4 alert types, outcome tracking, docs | ✅ Done (branch `feat/slice-4`) |
+| **5** | **Morning Briefing + Events** | Enriched briefing endpoint, events collector (SEC filings, earnings, macro), pre-open briefing job, morning brief UI on Command Center | ◻ Next |
+| **—** | **Historical Fundamentals Dashboard** | **Quarterly fundamentals history table, 4-5y collector (yfinance/SEC), time-series API, 14-chart grid UI. Design reference: `/tmp/builder-io-qualtrim-design`** | ◻ After Slice 5 or parallel |
+| **6** | **Intraday Alerts** | Real-time price triggers, risk breach monitoring, earnings/filing shock detection, alert precision KPI, WebSocket push | ◻ After Slice 5 |
+| **7** | **Vault Integration** | Link SQLite records to Obsidian notes, auto-create thesis notes from committee sessions, read/search vault from scanner UI | ◻ After Slice 6 |
