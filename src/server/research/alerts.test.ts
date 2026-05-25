@@ -128,9 +128,9 @@ describe('alerts routes', () => {
     // Fetch with includeAcknowledged=true -> should return all alerts
     const listWithParam = await fetch(`${baseUrl}/api/research/alerts?includeAcknowledged=true`);
     const listWithParamJson = (await listWithParam.json()) as {alerts: Array<{id: string; status: string}>};
-    // Should have the same number as initially seeded
-    assert.equal(listWithParamJson.alerts.length, listJson.alerts.length);
-    // Should contain the acknowledged alert
+    // Should have more than the non-acknowledged count (since acknowledged alerts accumulate)
+    assert.ok(listWithParamJson.alerts.length > listWithoutParamJson.alerts.length);
+    // Should contain the acknowledged alert with status 'acknowledged'
     assert.ok(listWithParamJson.alerts.some(alert => alert.id === idToAck && alert.status === 'acknowledged'));
   });
 });

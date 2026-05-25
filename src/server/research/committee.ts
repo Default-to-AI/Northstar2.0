@@ -24,6 +24,7 @@ type CommitteeSessionRow = {
 };
 
 type PacketPayload = {
+  id?: string;
   score?: {
     snapshotId?: number | null;
     modelId?: string | null;
@@ -354,6 +355,10 @@ export function registerCommitteeRoutes(app: Express, openDb: () => Database.Dat
       }
 
       const payload = JSON.parse(packet.payloadJson) as PacketPayload;
+      // Inject the packet id into payload so citationExistsInPayload can match
+      // evidence_packet:<id> citations against the actual packet id.
+      // The packet id is not stored inside payloadJson; it's separate DB metadata.
+      payload.id = packet.id;
       if (isPayloadEmpty(payload)) {
         return res.status(422).json({error: `Frozen evidence packet ${packet.id} has empty payload; regenerate evidence packet.`});
       }

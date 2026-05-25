@@ -15,6 +15,7 @@ import {openResearchDb} from './research/db.ts';
 import {registerCommitteeRoutes} from './research/committee.ts';
 import {registerArchiveRoutes} from './research/archive.ts';
 import {registerAlertRoutes} from './research/alerts.ts';
+import {registerOutcomeRoutes} from './research/outcomes.ts';
 import {freezeEvidencePacket, getFrozenEvidencePacket} from './research/evidence.ts';
 
 dotenv.config();
@@ -185,6 +186,7 @@ function registerApiRoutes(app: Express): void {
   registerCommitteeRoutes(app, openResearchDb);
   registerArchiveRoutes(app, openResearchDb);
   registerAlertRoutes(app, openResearchDb);
+  registerOutcomeRoutes(app, openResearchDb);
 
   app.post('/api/research/evidence/freeze', (req: Request<Record<string, never>, unknown, FreezeEvidenceRequest>, res: Response) => {
     const ticker = req.body?.ticker?.trim().toUpperCase();

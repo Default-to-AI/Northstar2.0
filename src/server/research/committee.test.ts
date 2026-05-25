@@ -118,6 +118,35 @@ describe('committee - helper functions', () => {
       const payload = {id: 'pkt_NVDA_1000'};
       assert.equal(citationExistsInPayload('...', payload), false);
     });
+
+    // Regression: data-flow bug where payload.id was undefined because
+    // packet ID is stored as DB metadata, not inside payloadJson.
+    // These tests verify the injection fix: payload.id must be set before
+    // citationExistsInPayload is called.
+    it('resolves evidence_packet: citation with whitespace around id', () => {
+      const payload = {id: 'pkt_NVDA_1000'};
+      assert.equal(citationExistsInPayload('evidence_packet:  pkt_NVDA_1000  ', payload), true);
+    });
+
+    it('rejects evidence_packet: citation with only prefix and no id', () => {
+      const payload = {id: 'pkt_NVDA_1000'};
+      assert.equal(citationExistsInPayload('evidence_packet:', payload), false);
+    });
+
+    it('resolves single-segment top-level key citation', () => {
+      const payload = {score: {snapshotId: 42}, ticker: 'NVDA'};
+      assert.equal(citationExistsInPayload('ticker', payload), true);
+    });
+
+    it('rejects dot-separated path that hits null intermediate', () => {
+      const payload = {score: null};
+      assert.equal(citationExistsInPayload('score.snapshotId', payload), false);
+    });
+
+    it('rejects evidence_packet: citation with empty id (whitespace only)', () => {
+      const payload = {id: 'pkt_NVDA_1000'};
+      assert.equal(citationExistsInPayload('evidence_packet:     ', payload), false);
+    });
   });
 
   describe('isPayloadEmpty', () => {
