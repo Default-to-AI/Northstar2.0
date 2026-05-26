@@ -8,6 +8,7 @@ import {
   applyUserPositionsUpdate,
   canPersistLocalPortfolio,
   clearLocalPortfolioHydrationMetadata,
+  hadAnyLocalSnapshotOnBoot,
   hadManualLocalSnapshotOnBoot,
   markPortfolioSourceForUserEdit,
   mapIbkrPositionsToPortfolioPositions,
@@ -57,7 +58,10 @@ export function usePortfolioData() {
     }
 
     const currentSource = localStorage.getItem(NORTHSTAR_PORTFOLIO_SOURCE_KEY);
-    if (currentSource !== 'manual' && !hadLocalSnapshotOnBoot.current) {
+    const hasAnyLocalSnapshotNow = hadAnyLocalSnapshotOnBoot();
+    const shouldHydratePositionsFromIbkr = currentSource !== 'manual' && !hasAnyLocalSnapshotNow;
+
+    if (shouldHydratePositionsFromIbkr) {
       const mappedPositions = mapIbkrPositionsToPortfolioPositions(ibkrPortfolio);
       setPositionsRaw(mappedPositions);
     }

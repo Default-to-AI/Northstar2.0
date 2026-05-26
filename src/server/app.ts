@@ -15,6 +15,8 @@ import {openResearchDb} from './research/db.ts';
 import {registerCommitteeRoutes} from './research/committee.ts';
 import {registerArchiveRoutes} from './research/archive.ts';
 import {registerAlertRoutes} from './research/alerts.ts';
+import {registerBriefingRoutes} from './research/briefing.ts';
+import {registerEventsRoutes} from './research/events.ts';
 import {registerOutcomeRoutes} from './research/outcomes.ts';
 import {freezeEvidencePacket, getFrozenEvidencePacket} from './research/evidence.ts';
 
@@ -186,6 +188,8 @@ function registerApiRoutes(app: Express): void {
   registerCommitteeRoutes(app, openResearchDb);
   registerArchiveRoutes(app, openResearchDb);
   registerAlertRoutes(app, openResearchDb);
+  registerBriefingRoutes(app, openResearchDb);
+  registerEventsRoutes(app, openResearchDb);
   registerOutcomeRoutes(app, openResearchDb);
 
   app.post('/api/research/evidence/freeze', (req: Request<Record<string, never>, unknown, FreezeEvidenceRequest>, res: Response) => {

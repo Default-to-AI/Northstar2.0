@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -151,6 +151,7 @@ def migrate(conn: sqlite3.Connection) -> None:
             )
         """)
         _migrate_v2(conn)
+        _migrate_v3(conn)
         _ensure_columns(conn)
         _backfill_legacy(conn)
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -185,6 +186,39 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
             UNIQUE(source_type, source_id, horizon_days),
             FOREIGN KEY(ticker) REFERENCES securities(ticker)
         )
+    """)
+
+
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """V3: morning_briefs and market_events tables for Slice 5 (Morning Briefing + Events)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS morning_briefs (
+            date TEXT PRIMARY KEY,
+            pipeline_readiness_json TEXT,
+            pre_market_context_json TEXT,
+            top_opportunities_json TEXT,
+            portfolio_snapshot_json TEXT,
+            status TEXT NOT NULL DEFAULT 'generated',
+            source TEXT NOT NULL DEFAULT 'cron',
+            generated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS market_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL CHECK(event_type IN ('earnings','macro','filing')),
+            ticker TEXT,
+            event_date TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            source TEXT NOT NULL,
+            relevant_holdings TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_market_events_date_type
+        ON market_events(event_date, event_type)
     """)
 
 

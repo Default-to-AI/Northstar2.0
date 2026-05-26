@@ -57,14 +57,15 @@ Existing:
 - `GET /api/research/alerts` — research alerts with four types; refresh on poll, deduplicated by lineage key.
 - `POST /api/research/alerts/:id/acknowledge` — user acknowledgment of an alert.
 - `GET /api/research/outcomes` — computed forward return records from `decision_outcomes`.
+- `GET /api/research/briefing` — command-center morning brief.
+- `POST /api/research/briefing/refresh` — runs briefing collector inline and returns refreshed result.
+- `GET /api/research/events` — earnings, macro events, and relevant holding/watchlist/candidate catalysts.
 
 Needed:
 
 - `GET /api/research/readiness` — pre-open pipeline source freshness and warnings.
-- `GET /api/research/briefing` — command-center morning brief.
 - `GET /api/research/scanner?queue=compounder|tactical` — ranked opportunities from score snapshots.
 - `GET /api/research/security/:ticker` — normalized evidence packet for one ticker.
-- `GET /api/research/events` — earnings, macro events, and relevant holding/watchlist/candidate catalysts.
 
 ## Conventions
 
