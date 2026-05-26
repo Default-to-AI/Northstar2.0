@@ -39,6 +39,29 @@ python3 -m scripts.research_engine.outcomes
 
 Discovers new sources (scanner signals, committee playbooks), seeds `decision_outcomes` rows, and computes forward returns. Idempotent — safe to re-run. See [research-outcomes.md](research-outcomes.md).
 
+### Morning briefing collector
+
+```sh
+python3 -m scripts.research_engine.briefing
+```
+
+Generates/replaces today's morning brief in `morning_briefs` with four sections:
+- pipeline readiness
+- pre-market context
+- top opportunities
+- portfolio snapshot
+
+### Events collector
+
+```sh
+python3 -m scripts.research_engine.collect_events
+```
+
+Collects upcoming events into `market_events` from:
+- yfinance earnings (watchlist + holdings)
+- static macro calendar (`data/macro-calendar.json`)
+- filing deadlines (fiscal-year-end based)
+
 ---
 
 ## Source Tiers
@@ -75,10 +98,11 @@ The path is resolved by `scripts/research_engine/db.py`:
 
 ## Migration Behavior
 
-Migrations are applied idempotently via `scripts/research_engine/migrations.py` (`SCHEMA_VERSION = 2`):
+Migrations are applied idempotently via `scripts/research_engine/migrations.py` (`SCHEMA_VERSION = 3`):
 
 - **V1 (Phase 1/2):** Creates core research store tables (`pipeline_runs`, `source_runs`, `securities`, `daily_prices`, `fundamentals`, `factor_snapshots`, `score_snapshots`, `score_model_versions`, `universe_memberships`, `security_identifiers`).
 - **V2 (Phase 3):** Adds `decision_outcomes` table for forward return tracking with `UNIQUE(source_type, source_id, horizon_days)`.
+- **V3 (Phase 4):** Adds `morning_briefs` table (daily briefing JSON sections) and `market_events` table (earnings/macro/filing events).
 - **Column backfill:** Missing columns from earlier partial schemas are added via `ALTER TABLE ... ADD COLUMN` (non-destructive).
 - **Legacy backfill:** Legacy `ticker_evidence` rows are copied into `securities` and `fundamentals` tables.
 
@@ -127,6 +151,36 @@ python3 -m scripts.research_engine.outcomes
 ```
 
 The outcome job calls `migrate()` which creates the table if missing.
+
+---
+
+### Research briefing + events API
+
+- `GET /api/research/briefing`
+  - returns `{ status: 'fresh', ... }` for today's brief
+  - returns `{ status: 'not_generated', date }` when absent
+- `POST /api/research/briefing/refresh`
+  - runs briefing collector inline
+  - waits for completion and returns fresh brief or error
+- `GET /api/research/events`
+  - returns upcoming events grouped by date
+  - includes `isHolding` marker for holdings/watchlist relevance
+
+### Pre-open scheduling (Hermes cron)
+
+- Job: `northstar-preopen-briefing-events` (`20666dd54758`)
+- Schedule: `0 13 * * 1-5`
+- Timezone: `America/New_York` (Hermes config)
+- Workdir: `/home/linux/.hermes/projects/northstar-2.0`
+- Commands:
+  - `python3 -m scripts.research_engine.briefing`
+  - `python3 -m scripts.research_engine.collect_events`
+
+Operator checks:
+```sh
+hermes cron list
+hermes cron run 20666dd54758
+```
 
 ---
 

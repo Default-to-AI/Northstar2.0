@@ -1,4 +1,4 @@
-import {useQuery} from '@tanstack/react-query';
+import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import {Card, CardContent} from '@/components/ui/card';
 import {Badge} from '@/components/ui/badge';
 
@@ -13,6 +13,41 @@ type AlertRecord = {
   sourceRunId: number | null;
   createdAt: string;
   status: 'active' | 'acknowledged';
+};
+
+type BriefingFreshResponse = {
+  status: 'fresh';
+  date: string;
+  generatedAt: string;
+  source: string;
+  pipelineReadiness: unknown;
+  preMarketContext: unknown;
+  topOpportunities: unknown;
+  portfolioSnapshot: unknown;
+};
+
+type BriefingNotGeneratedResponse = {
+  status: 'not_generated';
+  date?: string;
+  error?: string;
+};
+
+type BriefingResponse = BriefingFreshResponse | BriefingNotGeneratedResponse;
+
+type EventItem = {
+  type: string;
+  ticker: string | null;
+  title: string;
+  description: string | null;
+  isHolding: boolean;
+};
+
+type EventsResponse = {
+  generatedAt: string;
+  events: Array<{
+    date: string;
+    items: EventItem[];
+  }>;
 };
 
 function alertLabel(type: AlertType): string {
@@ -41,8 +76,51 @@ function alertGuidance(type: AlertType): string {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? 'n/a' : `${value.toFixed(2)}%`;
+}
+
+function formatCurrency(value: number | null): string {
+  return value === null ? 'n/a' : `$${value.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
+}
+
+function eventTypeLabel(type: string): string {
+  if (type === 'earnings') return 'Earnings';
+  if (type === 'macro') return 'Macro';
+  if (type === 'filing') return 'Filing';
+  return type;
+}
+
+function dateHeading(dateIso: string): string {
+  const date = new Date(`${dateIso}T00:00:00`);
+  const today = new Date();
+  const todayIso = today.toISOString().slice(0, 10);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+
+  const pretty = date.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+  if (dateIso === todayIso) return `Today • ${pretty}`;
+  if (dateIso === tomorrowIso) return `Tomorrow • ${pretty}`;
+  return pretty;
+}
+
 export default function CommandCenter() {
-  const {data, isLoading, isError} = useQuery({
+  const queryClient = useQueryClient();
+
+  const alertsQuery = useQuery({
     queryKey: ['research-alerts'],
     queryFn: async () => {
       const response = await fetch('/api/research/alerts');
@@ -52,21 +130,226 @@ export default function CommandCenter() {
     refetchInterval: 30_000,
   });
 
+  const briefingQuery = useQuery({
+    queryKey: ['research-briefing'],
+    queryFn: async () => {
+      const response = await fetch('/api/research/briefing');
+      if (!response.ok) throw new Error('Failed to load briefing');
+      return (await response.json()) as BriefingResponse;
+    },
+    refetchInterval: 60_000,
+  });
+
+  const eventsQuery = useQuery({
+    queryKey: ['research-events'],
+    queryFn: async () => {
+      const response = await fetch('/api/research/events');
+      if (!response.ok) throw new Error('Failed to load events');
+      return (await response.json()) as EventsResponse;
+    },
+    refetchInterval: 60_000,
+  });
+
+  const refreshBriefingMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/research/briefing/refresh', {method: 'POST'});
+      const body = (await response.json()) as BriefingResponse & {error?: string};
+      if (!response.ok) {
+        throw new Error(body.error ?? 'Refresh failed');
+      }
+      return body;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({queryKey: ['research-briefing']});
+    },
+  });
+
+  const briefingData = briefingQuery.data;
+  const isBriefingFresh = briefingData?.status === 'fresh';
+
+  const readiness = isBriefingFresh && isRecord(briefingData.pipelineReadiness)
+    ? briefingData.pipelineReadiness
+    : null;
+  const preMarket = isBriefingFresh && isRecord(briefingData.preMarketContext)
+    ? briefingData.preMarketContext
+    : null;
+  const portfolio = isBriefingFresh && isRecord(briefingData.portfolioSnapshot)
+    ? briefingData.portfolioSnapshot
+    : null;
+
+  const topOpportunities = isBriefingFresh && Array.isArray(briefingData.topOpportunities)
+    ? briefingData.topOpportunities
+    : [];
+
+  const readinessStatus = readiness ? asString(readiness.status) ?? 'unknown' : 'unknown';
+  const overnightSpyPercent = preMarket
+    ? asNumber(preMarket.spyOvernightChangePct) ?? asNumber(preMarket.overnightChangePct)
+    : null;
+
+  const macroNames = preMarket && Array.isArray(preMarket.keyMacro)
+    ? preMarket.keyMacro.filter((value): value is string => typeof value === 'string')
+    : [];
+
+  const nav = portfolio ? asNumber(portfolio.nav) : null;
+  const cashPct = portfolio ? asNumber(portfolio.cashPct) : null;
+  const grossExposurePct = portfolio
+    ? asNumber(portfolio.grossExposurePct) ?? asNumber(portfolio.exposurePct)
+    : null;
+
   return (
     <div className="p-4 space-y-4 max-w-[1200px] mx-auto">
       <h1 className="text-sm font-mono tracking-[0.2em] uppercase text-primary">Command Center</h1>
 
       <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
         <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="label-text">Morning briefing</h2>
+            {isBriefingFresh && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                generated: {briefingData.generatedAt}
+              </span>
+            )}
+          </div>
+
+          {briefingQuery.isLoading && (
+            <p className="text-sm font-mono text-muted-foreground">Loading briefing…</p>
+          )}
+
+          {briefingQuery.isError && (
+            <p className="text-sm font-mono text-negative">Failed to load briefing.</p>
+          )}
+
+          {!briefingQuery.isLoading && !briefingQuery.isError && briefingData?.status === 'not_generated' && (
+            <div className="space-y-3">
+              <p className="text-sm font-mono text-negative">Briefing hasn&apos;t run today.</p>
+              {refreshBriefingMutation.isError && (
+                <p className="text-xs font-mono text-negative">
+                  Refresh failed: {refreshBriefingMutation.error instanceof Error ? refreshBriefingMutation.error.message : 'Unknown error'}.
+                  {' '}Try again or use terminal: python3 -m scripts.research_engine.briefing
+                </p>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => refreshBriefingMutation.mutate()}
+                  disabled={refreshBriefingMutation.isPending}
+                  className="border border-border bg-background/40 px-3 py-1 text-xs font-mono uppercase tracking-wide disabled:opacity-60"
+                >
+                  {refreshBriefingMutation.isPending ? 'Running…' : 'Run briefing now'}
+                </button>
+              </div>
+              <pre className="border border-border bg-background/40 p-2 text-xs font-mono text-muted-foreground overflow-x-auto">
+                python3 -m scripts.research_engine.briefing
+              </pre>
+            </div>
+          )}
+
+          {!briefingQuery.isLoading && !briefingQuery.isError && isBriefingFresh && (
+            <div className="space-y-3">
+              <div className="border border-border p-3 bg-background/40 space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Readiness</h3>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                    {readinessStatus}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="border border-border p-3 bg-background/40 space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Pre-market</h3>
+                <p className="text-sm font-mono text-foreground">SPY overnight: {formatPercent(overnightSpyPercent)}</p>
+                <p className="text-xs font-mono text-muted-foreground">
+                  {macroNames.length > 0 ? `Key macro: ${macroNames.join(', ')}` : 'Key macro: none listed'}
+                </p>
+              </div>
+
+              <div className="border border-border p-3 bg-background/40 space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Top opportunities</h3>
+                <div className="flex flex-wrap gap-2">
+                  {topOpportunities.length === 0 && (
+                    <span className="text-xs font-mono text-muted-foreground">No opportunities available.</span>
+                  )}
+                  {topOpportunities.slice(0, 5).map((item, index) => {
+                    const record = isRecord(item) ? item : null;
+                    const ticker = record ? asString(record.ticker) ?? asString(record.symbol) ?? 'N/A' : 'N/A';
+                    const score = record
+                      ? asNumber(record.compounderScore) ?? asNumber(record.score)
+                      : null;
+                    return (
+                      <Badge key={`${ticker}-${index}`} variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                        {ticker} {score === null ? '' : score.toFixed(1)}
+                      </Badge>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border border-border p-3 bg-background/40 space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wide text-muted-foreground">Portfolio</h3>
+                <p className="text-sm font-mono text-foreground">NAV: {formatCurrency(nav)}</p>
+                <p className="text-xs font-mono text-muted-foreground">Cash: {formatPercent(cashPct)}</p>
+                <p className="text-xs font-mono text-muted-foreground">Exposure: {formatPercent(grossExposurePct)}</p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+        <CardContent className="p-4 space-y-3">
+          <h2 className="label-text">Upcoming events</h2>
+          {eventsQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading events…</p>}
+          {eventsQuery.isError && <p className="text-sm font-mono text-negative">Failed to load events.</p>}
+          {!eventsQuery.isLoading && !eventsQuery.isError && (eventsQuery.data?.events.length ?? 0) === 0 && (
+            <p className="text-sm font-mono text-muted-foreground">No upcoming events.</p>
+          )}
+
+          <div className="space-y-3">
+            {(eventsQuery.data?.events ?? []).map((group) => (
+              <div key={group.date} className="space-y-2">
+                <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">{dateHeading(group.date)}</p>
+                <div className="space-y-2">
+                  {group.items.map((item, index) => (
+                    <div key={`${group.date}-${item.type}-${item.ticker ?? 'macro'}-${index}`} className="border border-border p-2 bg-background/40">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                          {eventTypeLabel(item.type)}
+                        </Badge>
+                        {item.ticker && (
+                          <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                            {item.ticker}
+                          </Badge>
+                        )}
+                        {item.isHolding && (
+                          <span className="border border-negative/30 bg-negative/5 px-2 py-0.5 text-[10px] font-mono uppercase text-negative">
+                            Holding
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm font-mono text-foreground">{item.title}</p>
+                      {item.description && (
+                        <p className="mt-1 text-xs font-mono text-muted-foreground">{item.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+        <CardContent className="p-4 space-y-3">
           <h2 className="label-text">High-confidence research alerts</h2>
-          {isLoading && <p className="text-sm font-mono text-muted-foreground">Loading alerts…</p>}
-          {isError && <p className="text-sm font-mono text-negative">Failed to load alerts.</p>}
-          {!isLoading && !isError && (data?.alerts.length ?? 0) === 0 && (
+          {alertsQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading alerts…</p>}
+          {alertsQuery.isError && <p className="text-sm font-mono text-negative">Failed to load alerts.</p>}
+          {!alertsQuery.isLoading && !alertsQuery.isError && (alertsQuery.data?.alerts.length ?? 0) === 0 && (
             <p className="text-sm font-mono text-muted-foreground">No active alerts. No alert implies trade action.</p>
           )}
 
           <div className="space-y-2">
-            {(data?.alerts ?? []).filter((alert) => alert.status === 'active').map((alert) => (
+            {(alertsQuery.data?.alerts ?? []).filter((alert) => alert.status === 'active').map((alert) => (
               <div key={alert.id} className="border border-border p-3 bg-background/40">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
