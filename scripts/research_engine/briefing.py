@@ -288,8 +288,8 @@ def generate_briefing(
         pipeline_readiness = _collect_pipeline_readiness(conn)
         pre_market_context = _collect_pre_market_context()
         top_opportunities = _collect_top_opportunities(conn)
-        repo_root = resolve_db_path().parent  # data/northstar.db → data/ → repo root
-        portfolio_snapshot = _collect_portfolio_snapshot(repo_root.resolve())
+        repo_root = resolved.resolve().parent.parent  # <repo>/data/northstar.db → <repo>
+        portfolio_snapshot = _collect_portfolio_snapshot(repo_root)
 
         # Serialize to JSON strings
         pipeline_json = json.dumps(pipeline_readiness)

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from pathlib import Path
 
 from scripts.research_engine.migrations import migrate
 from scripts.research_engine.briefing import (
     _collect_pipeline_readiness,
     _collect_top_opportunities,
     _collect_pre_market_context,
+    _collect_portfolio_snapshot,
 )
 
 
@@ -72,6 +75,38 @@ def test_pre_market_context() -> None:
     print(f"  pre_market_context: PASS (note: {result['note'] or 'has data'})")
 
 
+def test_portfolio_snapshot_repo_root_path() -> None:
+    """Regression test: portfolio path resolves at <repo>/data, not <repo>/data/data."""
+    repo_root = Path(__file__).resolve().parents[3]
+    data_dir = repo_root / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    portfolio_path = data_dir / "ibkr-portfolio.json"
+
+    backup_content: str | None = None
+    if portfolio_path.exists():
+        backup_content = portfolio_path.read_text(encoding="utf-8")
+
+    fixture = {
+        "nav": {"endingValue": 1000},
+        "cash": {"endingCash": 250},
+        "positions": [{"positionValue": 300}, {"positionValue": 400}],
+    }
+
+    try:
+        portfolio_path.write_text(json.dumps(fixture), encoding="utf-8")
+        result = _collect_portfolio_snapshot(repo_root)
+        assert result is not None
+        assert result["nav"] == 1000.0
+        assert result["cashPct"] == 25.0
+        assert result["grossExposure"] == 700.0
+        print("  portfolio_snapshot_repo_root_path: PASS")
+    finally:
+        if backup_content is None:
+            portfolio_path.unlink(missing_ok=True)
+        else:
+            portfolio_path.write_text(backup_content, encoding="utf-8")
+
+
 if __name__ == "__main__":
     print("Running briefing collector tests...")
     test_pipeline_readiness()
@@ -79,4 +114,5 @@ if __name__ == "__main__":
     test_top_opportunities()
     test_empty_opportunities()
     test_pre_market_context()
+    test_portfolio_snapshot_repo_root_path()
     print("\nAll briefing tests PASS")
