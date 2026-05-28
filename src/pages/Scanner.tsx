@@ -77,7 +77,7 @@ export default function Scanner() {
           <Button
             variant="outline"
             className="rounded-none h-8 text-[10px] font-bold uppercase tracking-widest border-border bg-[#0d0d14] hover:bg-primary/5"
-            onClick={() => navigate('/scanner/insights')}
+            onClick={() => navigate('/insights')}
           >
             VIEW INSIGHTS
           </Button>
