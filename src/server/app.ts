@@ -549,6 +549,12 @@ function registerApiRoutes(app: Express): void {
           })),
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        const isMissingDb = message.includes('Northstar research DB not found');
+        if (isMissingDb) {
+          return res.json({query: q, results: [], meta: {status: 'no_db', message}});
+        }
+
         console.error('Securities search error:', error);
         return res.status(500).json({error: 'Failed to search securities'});
       }
@@ -693,6 +699,20 @@ function registerApiRoutes(app: Express): void {
             : undefined,
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        const isMissingDb = message.includes('Northstar research DB not found');
+        if (isMissingDb) {
+          return res.json({
+            tab,
+            generatedAt: new Date().toISOString(),
+            items: [],
+            meta: {
+              status: 'no_db',
+              message,
+            },
+          });
+        }
+
         console.error('Insights error:', error);
         return res.status(500).json({error: 'Failed to fetch insights'});
       }
