@@ -64,13 +64,24 @@ export default function Scanner() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1200px] mx-auto overflow-y-auto h-full pb-12">
-      <header className="space-y-1 pb-4 border-b border-border">
-        <h1 className="text-2xl font-mono font-bold text-primary tracking-tighter uppercase italic flex items-center gap-2">
-          <Sparkles size={24} /> OPPORTUNITY SCANNER
-        </h1>
-        <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-mono">
-          SYSTEM SCANNING FOR REVIEW-READY SETUPS — MULTI-FACTOR SIGNAL DETECTION
-        </p>
+      <header className="pb-4 border-b border-border">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-mono font-bold text-primary tracking-tighter uppercase italic flex items-center gap-2">
+              <Sparkles size={24} /> OPPORTUNITY SCANNER
+            </h1>
+            <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-mono">
+              SYSTEM SCANNING FOR REVIEW-READY SETUPS — MULTI-FACTOR SIGNAL DETECTION
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            className="rounded-none h-8 text-[10px] font-bold uppercase tracking-widest border-border bg-[#0d0d14] hover:bg-primary/5"
+            onClick={() => navigate('/scanner/insights')}
+          >
+            VIEW INSIGHTS
+          </Button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
