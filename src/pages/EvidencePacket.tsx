@@ -171,6 +171,30 @@ export default function EvidencePacket() {
     }
   };
 
+  const RefreshControls = ({className = ''}: {className?: string}) => (
+    <div className={`flex items-center gap-2 ${className}`.trim()}>
+      {refreshError ? (
+        <span className="text-[10px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 px-2 py-1 rounded-none">
+          {refreshError}
+        </span>
+      ) : null}
+      {refreshLoading && refreshLog.length > 0 ? (
+        <span className="text-[10px] font-mono text-muted-foreground bg-muted/10 border border-border px-2 py-1 rounded-none max-w-[380px] truncate">
+          {refreshLog.at(-1)}
+        </span>
+      ) : null}
+      <Button
+        type="button"
+        variant="outline"
+        className="rounded-none h-8 px-3 text-[10px] font-mono font-bold uppercase tracking-widest"
+        disabled={refreshLoading || normalizedTicker.length === 0}
+        onClick={() => void runRefreshStream()}
+      >
+        {refreshLoading ? 'Refreshing…' : 'Refresh'}
+      </Button>
+    </div>
+  );
+
   return (
     <>
       {isLoading ? (
@@ -189,6 +213,7 @@ export default function EvidencePacket() {
               <AlertTriangle size={14} /> Failed to load evidence
             </div>
             <p className="text-xs text-red-200">{error instanceof Error ? error.message : 'Unknown error'}</p>
+            <RefreshControls className="pt-1" />
             <p className="text-xs text-muted-foreground">
               Run: <code className="font-mono">python3 scripts/collect_evidence.py --ticker {normalizedTicker}</code>
             </p>
@@ -198,27 +223,7 @@ export default function EvidencePacket() {
 
       {data ? (
         <div className="w-full h-full relative">
-          <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
-            {refreshError ? (
-              <span className="text-[10px] font-mono text-red-300 bg-red-500/10 border border-red-500/30 px-2 py-1 rounded-none">
-                {refreshError}
-              </span>
-            ) : null}
-            {refreshLoading && refreshLog.length > 0 ? (
-              <span className="text-[10px] font-mono text-muted-foreground bg-muted/10 border border-border px-2 py-1 rounded-none max-w-[380px] truncate">
-                {refreshLog.at(-1)}
-              </span>
-            ) : null}
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-none h-8 px-3 text-[10px] font-mono font-bold uppercase tracking-widest"
-              disabled={refreshLoading}
-              onClick={() => void runRefreshStream()}
-            >
-              {refreshLoading ? 'Refreshing…' : 'Refresh'}
-            </Button>
-          </div>
+          <RefreshControls className="absolute top-4 right-4 z-10" />
           {variant === 'A' && <VariantA data={data} />}
           {variant === 'B' && <VariantB data={data} />}
           {variant === 'C' && <VariantC data={data} />}
