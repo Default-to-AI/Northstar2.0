@@ -189,10 +189,6 @@ function createAiClient(): GoogleGenAI {
 function registerApiRoutes(app: Express): void {
   const ai = createAiClient();
 
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({ok: true});
-  });
-
   app.post(
     '/api/committee/session',
     async (
