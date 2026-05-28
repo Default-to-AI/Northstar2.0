@@ -12,7 +12,7 @@ import {exec, spawn} from 'node:child_process';
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
 import type {IBKRPortfolioSnapshot} from '../types/ibkr';
-import {openResearchDb} from './research/db.ts';
+import {openResearchDb, resolveResearchDbPath} from './research/db.ts';
 import {registerCommitteeRoutes} from './research/committee.ts';
 import {registerArchiveRoutes} from './research/archive.ts';
 import {registerAlertRoutes} from './research/alerts.ts';
@@ -170,6 +170,57 @@ type InsightRow = {
   price: number | null;
   marketCap: number | null;
 };
+
+type SqlJsDatabase = {
+  exec: (sql: string, params?: Array<string | number | null>) => unknown;
+  prepare: (sql: string) => {
+    bind: (params: Array<string | number | null>) => void;
+    step: () => boolean;
+    getAsObject: () => Record<string, unknown>;
+    free: () => void;
+  };
+  close: () => void;
+};
+
+let sqlJsDbPromise: Promise<SqlJsDatabase> | null = null;
+
+async function openSqlJsDb(): Promise<SqlJsDatabase> {
+  if (sqlJsDbPromise) return sqlJsDbPromise;
+  sqlJsDbPromise = (async () => {
+    const dbPath = resolveResearchDbPath();
+    const bytes = await readFile(dbPath);
+    const initSqlJs = (await import('sql.js')).default as unknown as (
+      config?: {locateFile?: (file: string) => string}
+    ) => Promise<{Database: new (data: Uint8Array) => SqlJsDatabase}>;
+
+    const mod = await initSqlJs({
+      locateFile: (file) => {
+        // Ensure wasm is found when bundled by Vercel
+        return new URL(`../../node_modules/sql.js/dist/${file}`, import.meta.url).pathname;
+      },
+    });
+    return new mod.Database(new Uint8Array(bytes));
+  })();
+  return sqlJsDbPromise;
+}
+
+async function querySqlJsRows<T extends Record<string, unknown>>(
+  db: SqlJsDatabase,
+  sql: string,
+  params: Array<string | number | null>,
+): Promise<T[]> {
+  const stmt = db.prepare(sql);
+  try {
+    stmt.bind(params);
+    const out: T[] = [];
+    while (stmt.step()) {
+      out.push(stmt.getAsObject() as T);
+    }
+    return out;
+  } finally {
+    stmt.free();
+  }
+}
 
 type FinnhubNewsItem = {
   datetime: number;
@@ -502,7 +553,7 @@ function registerApiRoutes(app: Express): void {
 
   app.get(
     '/api/research/securities/search',
-    (req: Request<Record<string, never>, unknown, unknown, SecuritiesSearchQuery>, res: Response) => {
+    async (req: Request<Record<string, never>, unknown, unknown, SecuritiesSearchQuery>, res: Response) => {
       const q = req.query.q?.trim() ?? '';
       const rawLimit = Number.parseInt(req.query.limit ?? '10', 10);
       const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 10;
@@ -511,11 +562,12 @@ function registerApiRoutes(app: Express): void {
         return res.json({query: q, results: []});
       }
 
+      const qUpper = q.toUpperCase();
+      const likeAny = `%${qUpper}%`;
+      const likePrefix = `${qUpper}%`;
+
       try {
         const db = openResearchDb();
-        const qUpper = q.toUpperCase();
-        const likeAny = `%${qUpper}%`;
-        const likePrefix = `${qUpper}%`;
         const rows = db
           .prepare(
             `
@@ -555,15 +607,53 @@ function registerApiRoutes(app: Express): void {
           return res.json({query: q, results: [], meta: {status: 'no_db', message}});
         }
 
-        console.error('Securities search error:', error);
-        return res.status(500).json({error: 'Failed to search securities'});
+        // Vercel often fails to load native better-sqlite3; attempt a WASM fallback.
+        try {
+          const wasmDb = await openSqlJsDb();
+          const rows = await querySqlJsRows<SecuritySearchRow>(
+            wasmDb,
+            `
+              SELECT ticker, name, exchange, sector
+              FROM securities
+              WHERE active = 1
+                AND (
+                  UPPER(ticker) LIKE ? OR UPPER(COALESCE(name, '')) LIKE ?
+                )
+              ORDER BY
+                CASE
+                  WHEN UPPER(ticker) = ? THEN 0
+                  WHEN UPPER(ticker) LIKE ? THEN 1
+                  WHEN UPPER(COALESCE(name, '')) LIKE ? THEN 2
+                  ELSE 3
+                END,
+                ticker
+              LIMIT ?
+            `,
+            [likeAny, likeAny, qUpper, likePrefix, likeAny, limit],
+          );
+          return res.json({
+            query: q,
+            results: rows.map((row) => ({
+              ticker: row.ticker,
+              name: row.name,
+              exchange: row.exchange,
+              sector: row.sector,
+            })),
+            meta: {status: 'wasm_fallback', message: 'Using sql.js (WASM) database reader.'},
+          });
+        } catch (fallbackError) {
+          console.error('Securities search error:', error);
+          console.error('Securities search WASM fallback error:', fallbackError);
+          return res.status(500).json({error: 'Failed to search securities'});
+        }
+
       }
     },
   );
 
   app.get(
     '/api/research/insights',
-    (req: Request<Record<string, never>, unknown, unknown, InsightsQuery>, res: Response) => {
+    async (req: Request<Record<string, never>, unknown, unknown, InsightsQuery>, res: Response) => {
       const tab = (req.query.tab?.trim() || 'sp500').toLowerCase();
       const rawLimit = Number.parseInt(req.query.limit ?? '24', 10);
       const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 24;
@@ -589,97 +679,95 @@ function registerApiRoutes(app: Express): void {
         leisure: ['Consumer Discretionary', 'Communication Services'],
       };
 
+      const makeMeta = () => (isThemeTab
+        ? {
+            status: 'heuristic',
+            message: 'Theme insights are sector-based heuristics (tags are not yet available in the dataset).',
+          }
+        : undefined);
+
+      const baseSql = tab === 'trending'
+        ? `
+            SELECT
+              s.ticker,
+              s.name,
+              s.exchange,
+              s.sector,
+              f.current_price as price,
+              f.market_cap as marketCap
+            FROM securities s
+            LEFT JOIN fundamentals f ON f.ticker = s.ticker
+            LEFT JOIN score_snapshots ss ON ss.id = (
+              SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+            )
+            WHERE s.active = 1
+            ORDER BY COALESCE(ss.tactical_score, -1e9) DESC, s.ticker ASC
+            LIMIT ?
+          `
+        : tab === 'growth'
+          ? `
+              SELECT
+                s.ticker,
+                s.name,
+                s.exchange,
+                s.sector,
+                f.current_price as price,
+                f.market_cap as marketCap
+              FROM securities s
+              LEFT JOIN fundamentals f ON f.ticker = s.ticker
+              WHERE s.active = 1
+              ORDER BY COALESCE(f.revenue_growth, -1e9) DESC, s.ticker ASC
+              LIMIT ?
+            `
+          : (() => {
+              const sectorFilters = isThemeTab ? themeSectorFilter[tab] : undefined;
+              if (sectorFilters && sectorFilters.length > 0) {
+                const placeholders = sectorFilters.map(() => '?').join(',');
+                return {
+                  sql: `
+                      SELECT
+                        s.ticker,
+                        s.name,
+                        s.exchange,
+                        s.sector,
+                        f.current_price as price,
+                        f.market_cap as marketCap
+                      FROM securities s
+                      LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                      WHERE s.active = 1 AND s.sector IN (${placeholders})
+                      ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
+                      LIMIT ?
+                    `,
+                  params: [...sectorFilters, limit] as Array<string | number>,
+                };
+              }
+              return {
+                sql: `
+                    SELECT
+                      s.ticker,
+                      s.name,
+                      s.exchange,
+                      s.sector,
+                      f.current_price as price,
+                      f.market_cap as marketCap
+                    FROM securities s
+                    LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                    WHERE s.active = 1
+                    ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
+                    LIMIT ?
+                  `,
+                params: [limit] as Array<string | number>,
+              };
+            })();
+
+      const sqlInfo = typeof baseSql === 'string'
+        ? {sql: baseSql, params: [limit] as Array<string | number>}
+        : baseSql;
+
       try {
         const db = openResearchDb();
-
-        let rows: InsightRow[] = [];
-        if (tab === 'trending') {
-          rows = db
-            .prepare(
-              `
-                SELECT
-                  s.ticker,
-                  s.name,
-                  s.exchange,
-                  s.sector,
-                  f.current_price as price,
-                  f.market_cap as marketCap
-                FROM securities s
-                LEFT JOIN fundamentals f ON f.ticker = s.ticker
-                LEFT JOIN score_snapshots ss ON ss.id = (
-                  SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
-                )
-                WHERE s.active = 1
-                ORDER BY COALESCE(ss.tactical_score, -1e9) DESC, s.ticker ASC
-                LIMIT ?
-              `,
-            )
-            .all(limit) as InsightRow[];
-        } else if (tab === 'growth') {
-          rows = db
-            .prepare(
-              `
-                SELECT
-                  s.ticker,
-                  s.name,
-                  s.exchange,
-                  s.sector,
-                  f.current_price as price,
-                  f.market_cap as marketCap
-                FROM securities s
-                LEFT JOIN fundamentals f ON f.ticker = s.ticker
-                WHERE s.active = 1
-                ORDER BY COALESCE(f.revenue_growth, -1e9) DESC, s.ticker ASC
-                LIMIT ?
-              `,
-            )
-            .all(limit) as InsightRow[];
-        } else {
-          const sectorFilters = isThemeTab ? themeSectorFilter[tab] : undefined;
-          if (sectorFilters && sectorFilters.length > 0) {
-            const placeholders = sectorFilters.map(() => '?').join(',');
-            rows = db
-              .prepare(
-                `
-                  SELECT
-                    s.ticker,
-                    s.name,
-                    s.exchange,
-                    s.sector,
-                    f.current_price as price,
-                    f.market_cap as marketCap
-                  FROM securities s
-                  LEFT JOIN fundamentals f ON f.ticker = s.ticker
-                  WHERE s.active = 1 AND s.sector IN (${placeholders})
-                  ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
-                  LIMIT ?
-                `,
-              )
-              .all(...sectorFilters, limit) as InsightRow[];
-          } else {
-            rows = db
-              .prepare(
-                `
-                  SELECT
-                    s.ticker,
-                    s.name,
-                    s.exchange,
-                    s.sector,
-                    f.current_price as price,
-                    f.market_cap as marketCap
-                  FROM securities s
-                  LEFT JOIN fundamentals f ON f.ticker = s.ticker
-                  WHERE s.active = 1
-                  ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
-                  LIMIT ?
-                `,
-              )
-              .all(limit) as InsightRow[];
-          }
-        }
-
+        const rows = db.prepare(sqlInfo.sql).all(...sqlInfo.params) as InsightRow[];
         db.close();
-
         return res.json({
           tab,
           generatedAt: new Date().toISOString(),
@@ -691,12 +779,7 @@ function registerApiRoutes(app: Express): void {
             price: row.price,
             marketCap: row.marketCap,
           })),
-          meta: isThemeTab
-            ? {
-                status: 'heuristic',
-                message: 'Theme insights are sector-based heuristics (tags are not yet available in the dataset).',
-              }
-            : undefined,
+          meta: makeMeta(),
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -713,8 +796,36 @@ function registerApiRoutes(app: Express): void {
           });
         }
 
-        console.error('Insights error:', error);
-        return res.status(500).json({error: 'Failed to fetch insights'});
+        // Native SQLite binding may fail on Vercel; attempt WASM fallback.
+        try {
+          const wasmDb = await openSqlJsDb();
+          const rows = await querySqlJsRows<InsightRow>(
+            wasmDb,
+            sqlInfo.sql,
+            sqlInfo.params.map((p) => (typeof p === 'number' ? p : p)) as Array<string | number | null>,
+          );
+          return res.json({
+            tab,
+            generatedAt: new Date().toISOString(),
+            items: rows.map((row) => ({
+              ticker: row.ticker,
+              name: row.name,
+              exchange: row.exchange,
+              sector: row.sector,
+              price: row.price,
+              marketCap: row.marketCap,
+            })),
+            meta: {
+              ...(makeMeta() ?? {}),
+              status: 'wasm_fallback',
+              message: 'Using sql.js (WASM) database reader.',
+            },
+          });
+        } catch (fallbackError) {
+          console.error('Insights error:', error);
+          console.error('Insights WASM fallback error:', fallbackError);
+          return res.status(500).json({error: 'Failed to fetch insights'});
+        }
       }
     },
   );
