@@ -64,6 +64,11 @@ def _get_ticker_universe(conn: Any) -> list[str]:
 def _collect_earnings(conn: Any, tickers: list[str]) -> int:
     """Query yfinance for upcoming earnings dates for each ticker.
 
+    Important behavior:
+    - ETFs/funds do not have earnings. Yahoo endpoints may return 404 for fundamentals.
+      This is *not* a delisting signal.
+    - We treat "no earnings dates" as an expected outcome for non-equity tickers.
+
     Calls:
       - yfinance.Ticker(t).calendar  (next earnings date)
       - yfinance.Ticker(t).earnings_dates  (upcoming within 30 days)
@@ -76,6 +81,17 @@ def _collect_earnings(conn: Any, tickers: list[str]) -> int:
     # Clear existing earnings events
     conn.execute("DELETE FROM market_events WHERE event_type='earnings'")
     conn.commit()
+
+    # Explicit ETF allowlist.
+    # Reason: earnings are not applicable to ETFs and Yahoo fundamentals endpoints commonly 404.
+    # Keep this list small and pragmatic; expand as the portfolio/watchlist evolves.
+    ETF_TICKERS: set[str] = {
+        "QQQ",
+        "SPYD",
+        "SPHD",
+        "HDV",
+        "IGV",
+    }
 
     inserted = 0
     now = dt.datetime.now(dt.timezone.utc)
@@ -136,7 +152,11 @@ def _collect_earnings(conn: Any, tickers: list[str]) -> int:
             pass
 
         if not dates_found:
-            logger.debug("No upcoming earnings found for %s", ticker)
+            # For ETFs, earnings are not applicable.
+            if ticker in ETF_TICKERS:
+                logger.info("%s: ETF has no earnings; skipping", ticker)
+            else:
+                logger.debug("No upcoming earnings found for %s", ticker)
             continue
 
         date_strs = sorted(d.isoformat() for d in dates_found)
@@ -472,6 +492,26 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    # yfinance frequently emits noisy/incorrect ERROR logs for valid ETF symbols when fundamentals
+    # endpoints return 404. This is not actionable for ops.
+    class _SuppressYFinanceEtfNoise(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:  # type: ignore[override]
+            msg = record.getMessage()
+            # Yahoo quoteSummary fundamentals 404s for ETFs/funds (valid symbols).
+            if "No fundamentals data found for symbol:" in msg:
+                return False
+            # Also seen as a follow-on line from yfinance.
+            if msg.endswith(": No earnings dates found, symbol may be delisted"):
+                return False
+            return True
+
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        h.addFilter(_SuppressYFinanceEtfNoise())
+
+    # Keep yfinance logs quieter; we already emit our own per-ticker status lines.
+    logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
     db_path = resolve_db_path()
     logger.info("Database: %s", db_path)
