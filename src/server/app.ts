@@ -7,6 +7,7 @@ import {GoogleGenAI, Type} from '@google/genai';
 import dotenv from 'dotenv';
 import {readFile} from 'node:fs/promises';
 import path from 'path';
+import {exec, spawn} from 'node:child_process';
 
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
@@ -19,10 +20,26 @@ import {registerBriefingRoutes} from './research/briefing.ts';
 import {registerEventsRoutes} from './research/events.ts';
 import {registerOutcomeRoutes} from './research/outcomes.ts';
 import {freezeEvidencePacket, getFrozenEvidencePacket} from './research/evidence.ts';
+import {
+  buildTickerRefreshCooldownErrorPayload,
+  isTickerCooldownRejection,
+  TickerRefreshCooldown,
+} from './research/tickerRefreshCooldown.ts';
 
 dotenv.config();
 
 const isProd = process.env.NODE_ENV === 'production';
+
+const SECURITY_EVIDENCE_REFRESH_COOLDOWN_MS = Number.parseInt(
+  process.env.SECURITY_EVIDENCE_REFRESH_COOLDOWN_MS ?? '300000',
+  10,
+);
+
+const tickerRefreshCooldown = new TickerRefreshCooldown({
+  cooldownMs: Number.isFinite(SECURITY_EVIDENCE_REFRESH_COOLDOWN_MS)
+    ? SECURITY_EVIDENCE_REFRESH_COOLDOWN_MS
+    : 300_000,
+});
 
 type CommitteeSessionRequest = {
   ticker?: string;
@@ -564,6 +581,238 @@ function registerApiRoutes(app: Express): void {
         console.error('Security evidence error:', error);
         return res.status(500).json({error: 'Failed to fetch security evidence'});
       }
+    },
+  );
+
+  app.post('/api/research/security/:ticker/refresh', (req: Request<SecurityTickerParams>, res: Response) => {
+    const tickerRaw = req.params.ticker ?? '';
+    const ticker = tickerRaw.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
+      return res.status(400).json({error: 'Invalid ticker'});
+    }
+
+    const cooldownDecision = tickerRefreshCooldown.startOrReject(ticker);
+    if (isTickerCooldownRejection(cooldownDecision)) {
+      const payload = buildTickerRefreshCooldownErrorPayload(cooldownDecision);
+      res.setHeader('Retry-After', payload.retryAfterSeconds.toString());
+      return res.status(429).json(payload);
+    }
+
+    const TIMEOUT_MS = 120_000;
+    const cwd = process.cwd();
+
+    exec(
+      `python3 scripts/collect_evidence.py --ticker ${ticker}`,
+      {cwd, timeout: TIMEOUT_MS, maxBuffer: 2_000_000},
+      (err, stdout, stderr) => {
+        if (err) {
+          const message = err.killed && err.code === undefined
+            ? `Evidence collection timed out for ${ticker}.`
+            : (stderr || err.message).trim();
+          return res.status(502).json({
+            error: message,
+            ticker,
+            fallbackCommand: `python3 scripts/collect_evidence.py --ticker ${ticker}`,
+          });
+        }
+
+        try {
+          const db = openResearchDb();
+          const row = db
+            .prepare(
+              `
+                SELECT s.ticker, f.market_cap, f.trailing_pe, f.forward_pe, f.price_to_book,
+                       f.profit_margins, f.revenue_growth, f.fifty_day_ma, f.two_hundred_day_ma,
+                       f.fifty_two_week_high, f.fifty_two_week_low, f.current_price, f.data_as_of as last_updated, f.free_cashflow,
+                       (f.free_cashflow / (f.market_cap / f.price_to_sales)) as free_cashflow_margin,
+                       (f.free_cashflow / f.market_cap) as free_cashflow_yield,
+                       f.gross_margin, f.operating_margin,
+                       f.eps, f.ebitda, f.diluted_net_income, f.price_to_sales, f.ev_to_ebitda, f.ev_to_gross_profit,
+                       f.peg_ratio, f.operating_cash_flow, f.debt_to_equity, f.net_cash, f.current_ratio,
+                       f.roe, f.roic, f.revenue_per_employee, NULL as earnings_revisions, NULL as share_buybacks,
+                       NULL as insider_transactions, f.momentum_history, f.valuation_history,
+                       ss.id as score_snapshot_id, ss.score_model_id, ss.actionability_state, ss.warnings,
+                       ss.compounder_score, ss.tactical_score,
+                     f.avg_dollar_volume
+                FROM securities s
+                JOIN fundamentals f ON s.ticker = f.ticker
+                LEFT JOIN score_snapshots ss ON ss.id = (
+                  SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+                )
+                WHERE s.ticker = ?
+              `,
+            )
+            .get(ticker) as TickerEvidenceRow | undefined;
+          db.close();
+
+          if (!row) {
+            return res.status(502).json({
+              error: `Evidence collector completed but ${ticker} was not written to DB.`,
+              ticker,
+              stdout: stdout.trim() || null,
+            });
+          }
+
+          return res.json({
+            status: 'fresh',
+            stdout: stdout.trim() || null,
+            payload: {
+              ticker: row.ticker,
+              valuation: {
+                marketCap: row.market_cap,
+                trailingPE: row.trailing_pe,
+                forwardPE: row.forward_pe,
+                priceToBook: row.price_to_book,
+                priceToSales: row.price_to_sales,
+                evToEbitda: row.ev_to_ebitda,
+                evToGrossProfit: row.ev_to_gross_profit,
+                pegRatio: row.peg_ratio,
+              },
+              fundamentals: {
+                profitMargins: row.profit_margins,
+                revenueGrowth: row.revenue_growth,
+                freeCashflow: row.free_cashflow,
+                freeCashflowMargin: row.free_cashflow_margin,
+                freeCashflowYield: row.free_cashflow_yield,
+                grossMargin: row.gross_margin,
+                operatingMargin: row.operating_margin,
+                eps: row.eps,
+                ebitda: row.ebitda,
+                dilutedNetIncome: row.diluted_net_income,
+                operatingCashFlow: row.operating_cash_flow,
+              },
+              financialStrength: {
+                debtToEquity: row.debt_to_equity,
+                netCash: row.net_cash,
+                currentRatio: row.current_ratio,
+                roe: row.roe,
+                roic: row.roic,
+                revenuePerEmployee: row.revenue_per_employee,
+                earningsRevisions: row.earnings_revisions,
+                shareBuybacks: row.share_buybacks,
+                insiderTransactions: row.insider_transactions,
+              },
+              technicals: {
+                fiftyDayMA: row.fifty_day_ma,
+                twoHundredDayMA: row.two_hundred_day_ma,
+                fiftyTwoWeekHigh: row.fifty_two_week_high,
+                fiftyTwoWeekLow: row.fifty_two_week_low,
+                currentPrice: row.current_price,
+              },
+              history: {
+                momentum: parseJsonArray(row.momentum_history),
+                valuation: parseJsonArray(row.valuation_history),
+              },
+              score: {
+                snapshotId: row.score_snapshot_id,
+                modelId: row.score_model_id,
+                actionabilityState: row.actionability_state,
+                compounderScore: row.compounder_score,
+                tacticalScore: row.tactical_score,
+                warnings: parseJsonStringArray(row.warnings),
+              },
+              lastUpdated: row.last_updated,
+            },
+          });
+        } catch (queryError) {
+          console.error('Evidence refresh query error:', queryError);
+          return res.status(500).json({error: 'Failed to load evidence after refresh'});
+        }
+      },
+    );
+  });
+
+  app.get(
+    '/api/research/security/:ticker/refresh/stream',
+    (req: Request<SecurityTickerParams>, res: Response) => {
+      const tickerRaw = req.params.ticker ?? '';
+      const ticker = tickerRaw.trim().toUpperCase();
+      if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
+        return res.status(400).json({error: 'Invalid ticker'});
+      }
+
+      const cooldownDecision = tickerRefreshCooldown.startOrReject(ticker);
+      if (isTickerCooldownRejection(cooldownDecision)) {
+        const payload = buildTickerRefreshCooldownErrorPayload(cooldownDecision);
+        res.setHeader('Retry-After', payload.retryAfterSeconds.toString());
+        return res.status(429).json(payload);
+      }
+
+      const sendEvent = (event: string, data: string): void => {
+        const safe = data.replaceAll('\n', ' ');
+        res.write(`event: ${event}\n`);
+        res.write(`data: ${safe}\n\n`);
+      };
+
+      res.status(200);
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+
+      sendEvent('start', `Collecting evidence for ${ticker}…`);
+
+      const child = spawn('python3', ['scripts/collect_evidence.py', '--ticker', ticker], {
+        cwd: process.cwd(),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+
+      const writeChunk = (chunk: unknown, streamLabel: string): void => {
+        const text =
+          typeof chunk === 'string'
+            ? chunk
+            : chunk instanceof Buffer
+              ? chunk.toString('utf8')
+              : '';
+
+        text
+          .split(/\r?\n/)
+          .filter((line) => line.trim().length > 0)
+          .forEach((line) => sendEvent('log', `[${streamLabel}] ${line}`));
+      };
+
+      child.stdout?.on('data', (chunk) => writeChunk(chunk, 'stdout'));
+      child.stderr?.on('data', (chunk) => writeChunk(chunk, 'stderr'));
+
+      const timeout = setTimeout(() => {
+        sendEvent('error', `Evidence collection timed out for ${ticker}.`);
+        child.kill('SIGKILL');
+      }, 120_000);
+
+      const cleanup = (): void => {
+        clearTimeout(timeout);
+      };
+
+      res.on('close', () => {
+        cleanup();
+        child.kill('SIGKILL');
+      });
+
+      child.on('error', (error) => {
+        cleanup();
+        sendEvent('error', error.message || 'Failed to spawn evidence collector');
+        res.end();
+      });
+
+      child.on('exit', (code, signal) => {
+        cleanup();
+
+        if (signal) {
+          sendEvent('error', `Evidence collector terminated (${signal}) for ${ticker}.`);
+          res.end();
+          return;
+        }
+
+        if (code !== 0) {
+          sendEvent('error', `Evidence collector failed (exit ${code ?? 'unknown'}) for ${ticker}.`);
+          res.end();
+          return;
+        }
+
+        sendEvent('done', ticker);
+        res.end();
+      });
     },
   );
 
