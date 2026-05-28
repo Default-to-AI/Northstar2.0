@@ -96,6 +96,15 @@ export default function ScannerInsights() {
     const controller = new AbortController();
     fetch(`/api/research/insights?tab=${encodeURIComponent(tab)}&limit=24`, {signal: controller.signal})
       .then(async (response) => {
+        const contentType = response.headers.get('content-type') ?? '';
+        if (!contentType.includes('application/json')) {
+          const body = await response.text();
+          if (body.toLowerCase().includes('<!doctype html>')) {
+            throw new Error('API endpoint returned HTML instead of JSON. Ensure Vercel is routing /api/* to the serverless function.');
+          }
+          throw new Error('Insights endpoint did not return JSON.');
+        }
+
         const payload = (await response.json()) as InsightsResponse;
         if (!response.ok || payload.error) {
           throw new Error(payload.error ?? 'Failed to load insights');
