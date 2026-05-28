@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, List, Users, Archive as ArchiveIcon, UserCircle, Sparkles } from 'lucide-react';
+import { LayoutDashboard, List, Users, Archive as ArchiveIcon, UserCircle, Sparkles, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import CommandCenter from './pages/CommandCenter';
 import Dashboard from './pages/Dashboard';
@@ -41,6 +41,7 @@ function Sidebar() {
     { to: '/watchlist', icon: List, label: 'Watchlist' },
     { to: '/committee', icon: Users, label: 'Committee' },
     { to: '/scanner', icon: Sparkles, label: 'Scanner' },
+    { to: '/insights', icon: BarChart3, label: 'Insights' },
     { to: '/archive', icon: ArchiveIcon, label: 'Archive' },
     { to: '/profile', icon: UserCircle, label: 'Profile' },
   ];
@@ -105,6 +106,8 @@ export default function App() {
                 <Route path="/committee" element={<Committee />} />
                 <Route path="/scanner" element={<Scanner />} />
                 <Route path="/scanner/insights" element={<ScannerInsights />} />
+                <Route path="/insights" element={<ScannerInsights />} />
+                <Route path="/insights/:ticker" element={<EvidencePacket />} />
                 <Route path="/security/:ticker" element={<EvidencePacket />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />

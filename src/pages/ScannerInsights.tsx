@@ -206,7 +206,7 @@ export default function ScannerInsights() {
                   if (e.key === 'Enter') {
                     const first = searchResults[0];
                     if (first) {
-                      navigate(`/security/${first.ticker}`);
+                      navigate(`/insights/${first.ticker}`);
                       setSearchOpen(false);
                     }
                   }
@@ -234,7 +234,7 @@ export default function ScannerInsights() {
                         'w-full text-left px-3 py-2 border-b border-border/40 hover:bg-primary/5 focus:bg-primary/5 focus:outline-none',
                       )}
                       onClick={() => {
-                        navigate(`/security/${result.ticker}`);
+                        navigate(`/insights/${result.ticker}`);
                         setSearchOpen(false);
                       }}
                     >
@@ -280,7 +280,7 @@ export default function ScannerInsights() {
               key={item.ticker}
               type="button"
               className="text-left"
-              onClick={() => navigate(`/security/${item.ticker}`)}
+              onClick={() => navigate(`/insights/${item.ticker}`)}
             >
               <Card className="rounded-none bg-[#0d0d14] border-border hover:border-primary/40 transition-all terminal-border p-4 h-full">
                 <div className="flex items-start justify-between gap-3">
