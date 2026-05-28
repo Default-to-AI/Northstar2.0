@@ -61,6 +61,16 @@ type BatchPricesQuery = {
   tickers?: string;
 };
 
+type SecuritiesSearchQuery = {
+  q?: string;
+  limit?: string;
+};
+
+type InsightsQuery = {
+  tab?: string;
+  limit?: string;
+};
+
 type SpyHistoryQuery = {
   range?: string;
 };
@@ -143,6 +153,22 @@ type ScannerRow = {
   actionabilityState: string;
   warnings: string | null;
   scoreModelId: string;
+};
+
+type SecuritySearchRow = {
+  ticker: string;
+  name: string | null;
+  exchange: string | null;
+  sector: string | null;
+};
+
+type InsightRow = {
+  ticker: string;
+  name: string | null;
+  exchange: string | null;
+  sector: string | null;
+  price: number | null;
+  marketCap: number | null;
 };
 
 type FinnhubNewsItem = {
@@ -473,6 +499,205 @@ function registerApiRoutes(app: Express): void {
       return res.status(500).json({ error: 'Failed to fetch scanner queue' });
     }
   });
+
+  app.get(
+    '/api/research/securities/search',
+    (req: Request<Record<string, never>, unknown, unknown, SecuritiesSearchQuery>, res: Response) => {
+      const q = req.query.q?.trim() ?? '';
+      const rawLimit = Number.parseInt(req.query.limit ?? '10', 10);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 50) : 10;
+
+      if (!q) {
+        return res.json({query: q, results: []});
+      }
+
+      try {
+        const db = openResearchDb();
+        const qUpper = q.toUpperCase();
+        const likeAny = `%${qUpper}%`;
+        const likePrefix = `${qUpper}%`;
+        const rows = db
+          .prepare(
+            `
+              SELECT ticker, name, exchange, sector
+              FROM securities
+              WHERE active = 1
+                AND (
+                  UPPER(ticker) LIKE ? OR UPPER(COALESCE(name, '')) LIKE ?
+                )
+              ORDER BY
+                CASE
+                  WHEN UPPER(ticker) = ? THEN 0
+                  WHEN UPPER(ticker) LIKE ? THEN 1
+                  WHEN UPPER(COALESCE(name, '')) LIKE ? THEN 2
+                  ELSE 3
+                END,
+                ticker
+              LIMIT ?
+            `,
+          )
+          .all(likeAny, likeAny, qUpper, likePrefix, likeAny, limit) as SecuritySearchRow[];
+        db.close();
+
+        return res.json({
+          query: q,
+          results: rows.map((row) => ({
+            ticker: row.ticker,
+            name: row.name,
+            exchange: row.exchange,
+            sector: row.sector,
+          })),
+        });
+      } catch (error) {
+        console.error('Securities search error:', error);
+        return res.status(500).json({error: 'Failed to search securities'});
+      }
+    },
+  );
+
+  app.get(
+    '/api/research/insights',
+    (req: Request<Record<string, never>, unknown, unknown, InsightsQuery>, res: Response) => {
+      const tab = (req.query.tab?.trim() || 'sp500').toLowerCase();
+      const rawLimit = Number.parseInt(req.query.limit ?? '24', 10);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 24;
+
+      const unavailableTabs = new Set(['dividend', 'buyback']);
+      if (unavailableTabs.has(tab)) {
+        return res.json({
+          tab,
+          generatedAt: new Date().toISOString(),
+          items: [],
+          meta: {
+            status: 'unavailable',
+            message: 'This insights tab is not yet available with the current dataset.',
+          },
+        });
+      }
+
+      const isThemeTab = ['ai', 'cloud', 'ev', 'leisure'].includes(tab);
+      const themeSectorFilter: Record<string, string[] | undefined> = {
+        ai: ['Technology'],
+        cloud: ['Technology', 'Communication Services'],
+        ev: ['Consumer Discretionary'],
+        leisure: ['Consumer Discretionary', 'Communication Services'],
+      };
+
+      try {
+        const db = openResearchDb();
+
+        let rows: InsightRow[] = [];
+        if (tab === 'trending') {
+          rows = db
+            .prepare(
+              `
+                SELECT
+                  s.ticker,
+                  s.name,
+                  s.exchange,
+                  s.sector,
+                  f.current_price as price,
+                  f.market_cap as marketCap
+                FROM securities s
+                LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                LEFT JOIN score_snapshots ss ON ss.id = (
+                  SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+                )
+                WHERE s.active = 1
+                ORDER BY COALESCE(ss.tactical_score, -1e9) DESC, s.ticker ASC
+                LIMIT ?
+              `,
+            )
+            .all(limit) as InsightRow[];
+        } else if (tab === 'growth') {
+          rows = db
+            .prepare(
+              `
+                SELECT
+                  s.ticker,
+                  s.name,
+                  s.exchange,
+                  s.sector,
+                  f.current_price as price,
+                  f.market_cap as marketCap
+                FROM securities s
+                LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                WHERE s.active = 1
+                ORDER BY COALESCE(f.revenue_growth, -1e9) DESC, s.ticker ASC
+                LIMIT ?
+              `,
+            )
+            .all(limit) as InsightRow[];
+        } else {
+          const sectorFilters = isThemeTab ? themeSectorFilter[tab] : undefined;
+          if (sectorFilters && sectorFilters.length > 0) {
+            const placeholders = sectorFilters.map(() => '?').join(',');
+            rows = db
+              .prepare(
+                `
+                  SELECT
+                    s.ticker,
+                    s.name,
+                    s.exchange,
+                    s.sector,
+                    f.current_price as price,
+                    f.market_cap as marketCap
+                  FROM securities s
+                  LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                  WHERE s.active = 1 AND s.sector IN (${placeholders})
+                  ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
+                  LIMIT ?
+                `,
+              )
+              .all(...sectorFilters, limit) as InsightRow[];
+          } else {
+            rows = db
+              .prepare(
+                `
+                  SELECT
+                    s.ticker,
+                    s.name,
+                    s.exchange,
+                    s.sector,
+                    f.current_price as price,
+                    f.market_cap as marketCap
+                  FROM securities s
+                  LEFT JOIN fundamentals f ON f.ticker = s.ticker
+                  WHERE s.active = 1
+                  ORDER BY COALESCE(f.market_cap, -1e18) DESC, s.ticker ASC
+                  LIMIT ?
+                `,
+              )
+              .all(limit) as InsightRow[];
+          }
+        }
+
+        db.close();
+
+        return res.json({
+          tab,
+          generatedAt: new Date().toISOString(),
+          items: rows.map((row) => ({
+            ticker: row.ticker,
+            name: row.name,
+            exchange: row.exchange,
+            sector: row.sector,
+            price: row.price,
+            marketCap: row.marketCap,
+          })),
+          meta: isThemeTab
+            ? {
+                status: 'heuristic',
+                message: 'Theme insights are sector-based heuristics (tags are not yet available in the dataset).',
+              }
+            : undefined,
+        });
+      } catch (error) {
+        console.error('Insights error:', error);
+        return res.status(500).json({error: 'Failed to fetch insights'});
+      }
+    },
+  );
 
   app.get(
     '/api/research/security/:ticker',
