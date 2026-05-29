@@ -168,4 +168,31 @@ describe('insights routes', () => {
     const priceKpi = snapshotModule.items.find((k: any) => k.label === 'PRICE');
     assert.ok(priceKpi.value.includes('200.12'));
   });
+  it('returns insider trades table for valid ticker', async () => {
+    const response = await fetch(`${baseUrl}/api/insights/AAPL/insider-trades`);
+    assert.equal(response.status, 200);
+    const json = (await response.json()) as any;
+    assert.equal(json.kind, 'table');
+    assert.equal(json.title, 'INSIDER TRADES');
+    assert.ok(json.rows.length > 0);
+  });
+
+  it('returns analyst estimates table for valid ticker', async () => {
+    const response = await fetch(`${baseUrl}/api/insights/AAPL/analyst-estimates`);
+    assert.equal(response.status, 200);
+    const json = (await response.json()) as any;
+    assert.equal(json.kind, 'table');
+    assert.equal(json.title, 'ANALYST ESTIMATES');
+    assert.ok(json.rows.length > 0);
+  });
+
+  it('returns charts data for valid ticker', async () => {
+    const response = await fetch(`${baseUrl}/api/insights/AAPL/charts?timeframe=TTM`);
+    assert.equal(response.status, 200);
+    const json = (await response.json()) as any;
+    assert.equal(json.kind, 'chart');
+    assert.equal(json.title, 'HISTORICAL FINANCIALS');
+    assert.equal(json.series.length, 2);
+    assert.ok(json.series[0].points.length === 12);
+  });
 });

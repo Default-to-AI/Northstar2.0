@@ -9,6 +9,7 @@ import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import path from 'path';
 import {exec, spawn} from 'node:child_process';
+import YahooFinance from 'yahoo-finance2';
 
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
@@ -1571,6 +1572,143 @@ function registerApiRoutes(app: Express): void {
       }
     }
   );
+
+  app.get(
+    '/api/insights/:ticker/insider-trades',
+    async (req: Request<SecurityTickerParams>, res: Response) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+      try {
+        const yf = new YahooFinance();
+        const result = await yf.quoteSummary(ticker, { modules: ['insiderTransactions'] });
+        const transactions = result.insiderTransactions?.transactions || [];
+        
+        const rows = transactions.slice(0, 10).map((t, i) => ({
+          key: String(i),
+          values: {
+            date: t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : 'Unknown',
+            name: t.filerName || 'Unknown',
+            type: t.transactionText ? (t.transactionText.toLowerCase().includes('sale') ? 'Sell' : 'Buy') : 'Unknown',
+            shares: t.shares ? t.shares.toLocaleString() : '—',
+            value: t.value ? '$' + t.value.toLocaleString() : '—'
+          }
+        }));
+
+        const module = {
+          kind: 'table',
+          title: 'INSIDER TRADES',
+          columns: [
+            {key: 'date', label: 'Date'},
+            {key: 'name', label: 'Insider'},
+            {key: 'type', label: 'Type'},
+            {key: 'shares', label: 'Shares'},
+            {key: 'value', label: 'Value'}
+          ],
+          rows
+        };
+        return res.json(module);
+      } catch (e) {
+        console.error('Insider trades error:', e);
+        return res.status(500).json({error: 'Failed to fetch insider trades'});
+      }
+    }
+  );
+
+  app.get(
+    '/api/insights/:ticker/analyst-estimates',
+    async (req: Request<SecurityTickerParams>, res: Response) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+      try {
+        const yf = new YahooFinance();
+        const result = await yf.quoteSummary(ticker, { modules: ['earningsTrend'] });
+        const trend = result.earningsTrend?.trend || [];
+        
+        const rows = trend.slice(0, 4).map((t, i) => {
+          const revAvg = t.revenueEstimate?.avg;
+          const revStr = revAvg ? (revAvg >= 1e9 ? '$' + (revAvg / 1e9).toFixed(1) + 'B' : '$' + (revAvg / 1e6).toFixed(1) + 'M') : '—';
+          return {
+            key: String(i),
+            values: {
+              period: t.period || 'Unknown',
+              eps: t.earningsEstimate?.avg ? '$' + t.earningsEstimate.avg.toFixed(2) : '—',
+              revenue: revStr
+            }
+          };
+        });
+
+        const module = {
+          kind: 'table',
+          title: 'ANALYST ESTIMATES',
+          columns: [
+            {key: 'period', label: 'Period'},
+            {key: 'eps', label: 'Consensus EPS'},
+            {key: 'revenue', label: 'Consensus Rev'}
+          ],
+          rows
+        };
+        return res.json(module);
+      } catch (e) {
+        console.error('Analyst estimates error:', e);
+        return res.status(500).json({error: 'Failed to fetch analyst estimates'});
+      }
+    }
+  );
+
+  app.get(
+    '/api/insights/:ticker/charts',
+    async (req: Request<SecurityTickerParams>, res: Response) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      const timeframe = (req.query.timeframe as string) || 'Annually';
+      
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+      try {
+        const yf = new YahooFinance();
+        const interval = timeframe === 'Quarterly' ? '3mo' : (timeframe === 'TTM' ? '1mo' : '1mo');
+        
+        const now = new Date();
+        if (timeframe === 'Quarterly') now.setFullYear(now.getFullYear() - 2);
+        else if (timeframe === 'TTM') now.setFullYear(now.getFullYear() - 1);
+        else now.setFullYear(now.getFullYear() - 5);
+        const period1 = now.toISOString().split('T')[0];
+        
+        const chartRes = await yf.chart(ticker, { period1, interval });
+        const quotes = chartRes.quotes || [];
+        
+        const points = quotes.map((q) => {
+          const d = new Date(q.date);
+          const x = timeframe === 'Annually' ? d.getFullYear().toString() : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}`;
+          return {
+            x,
+            y: q.close || null
+          };
+        });
+
+        const module = {
+          kind: 'chart',
+          title: 'HISTORICAL FINANCIALS',
+          series: [
+            {
+              key: 'price',
+              label: 'Price History',
+              points
+            }
+          ]
+        };
+        return res.json(module);
+      } catch (e) {
+        console.error('Charts error:', e);
+        return res.status(500).json({error: 'Failed to fetch charts'});
+      }
+    }
+  );
+
 }
 
 const YAHOO_HEADERS: HeadersInit = {
