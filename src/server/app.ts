@@ -5,6 +5,7 @@ import express, {
 } from 'express';
 import {GoogleGenAI, Type} from '@google/genai';
 import dotenv from 'dotenv';
+import {existsSync} from 'node:fs';
 import {readFile} from 'node:fs/promises';
 import path from 'path';
 import {exec, spawn} from 'node:child_process';
@@ -184,6 +185,27 @@ type SqlJsDatabase = {
 
 let sqlJsDbPromise: Promise<SqlJsDatabase> | null = null;
 
+function getResearchRuntimeMeta(): Record<string, unknown> {
+  let dbPath: string | null = null;
+  let dbExists: boolean | null = null;
+  try {
+    dbPath = resolveResearchDbPath();
+    dbExists = existsSync(dbPath);
+  } catch {
+    dbPath = null;
+    dbExists = null;
+  }
+
+  const wasmPath = path.resolve(process.cwd(), 'data', 'sql-wasm.wasm');
+
+  return {
+    node: process.version,
+    platform: process.platform,
+    db: {path: dbPath, exists: dbExists},
+    wasm: {path: wasmPath, exists: existsSync(wasmPath)},
+  };
+}
+
 async function openSqlJsDb(): Promise<SqlJsDatabase> {
   if (sqlJsDbPromise) return sqlJsDbPromise;
   sqlJsDbPromise = (async () => {
@@ -193,10 +215,17 @@ async function openSqlJsDb(): Promise<SqlJsDatabase> {
       config?: {locateFile?: (file: string) => string}
     ) => Promise<{Database: new (data: Uint8Array) => SqlJsDatabase}>;
 
+    const repoWasmPath = path.resolve(process.cwd(), 'data', 'sql-wasm.wasm');
+
     const mod = await initSqlJs({
       locateFile: (file) => {
-        // Ensure wasm is found when bundled by Vercel
-        return new URL(`../../node_modules/sql.js/dist/${file}`, import.meta.url).pathname;
+        // Prefer a controlled repo path so Vercel includeFiles can reliably ship the WASM.
+        if (existsSync(repoWasmPath)) {
+          return repoWasmPath;
+        }
+
+        // Fallback to sql.js dist path for local/dev environments.
+        return path.resolve(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
       },
     });
     return new mod.Database(new Uint8Array(bytes));
@@ -644,7 +673,13 @@ function registerApiRoutes(app: Express): void {
         } catch (fallbackError) {
           console.error('Securities search error:', error);
           console.error('Securities search WASM fallback error:', fallbackError);
-          return res.status(500).json({error: 'Failed to search securities'});
+          return res.status(500).json({
+            error: 'Failed to search securities',
+            meta: {
+              status: 'wasm_fallback_failed',
+              runtime: getResearchRuntimeMeta(),
+            },
+          });
         }
 
       }
@@ -824,7 +859,13 @@ function registerApiRoutes(app: Express): void {
         } catch (fallbackError) {
           console.error('Insights error:', error);
           console.error('Insights WASM fallback error:', fallbackError);
-          return res.status(500).json({error: 'Failed to fetch insights'});
+          return res.status(500).json({
+            error: 'Failed to fetch insights',
+            meta: {
+              status: 'wasm_fallback_failed',
+              runtime: getResearchRuntimeMeta(),
+            },
+          });
         }
       }
     },
