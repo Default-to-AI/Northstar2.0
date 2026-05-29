@@ -11,6 +11,7 @@ import Committee from './pages/Committee';
 import Scanner from './pages/Scanner';
 import ScannerInsights from './pages/ScannerInsights';
 import EvidencePacket from './pages/EvidencePacket';
+import InsightsTicker from './pages/InsightsTicker';
 import { Badge } from '@/components/ui/badge';
 import PipelineReadinessIndicator from './components/PipelineReadinessIndicator';
 
@@ -107,7 +108,7 @@ export default function App() {
                 <Route path="/scanner" element={<Scanner />} />
                 <Route path="/scanner/insights" element={<ScannerInsights />} />
                 <Route path="/insights" element={<ScannerInsights />} />
-                <Route path="/insights/:ticker" element={<EvidencePacket />} />
+                <Route path="/insights/:ticker" element={<InsightsTicker />} />
                 <Route path="/security/:ticker" element={<EvidencePacket />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />
