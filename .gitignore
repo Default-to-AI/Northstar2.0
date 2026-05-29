@@ -7,7 +7,16 @@ coverage/
 .worktrees/
 __pycache__/
 *.pyc
+
+# Local-only tooling / agent state (do not commit)
+.venv/
+.claude/
+.codegraph/
+.mcp.json
+opencode.jsonc
+
 .env*
 !.env.example
 .vercel
 *.db
+!data/*.db
