@@ -124,6 +124,9 @@ export type InsightModule =
 
 export type InsightsTickerResponse = {
   ticker: string;
+  name: string | null;
+  exchange: string | null;
+  sector: string | null;
   generatedAt: string;
   modules: InsightModule[];
   error?: string;

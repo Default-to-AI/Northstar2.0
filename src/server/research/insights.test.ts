@@ -33,7 +33,10 @@ function seed(): void {
     CREATE TABLE IF NOT EXISTS score_snapshots (
       id INTEGER PRIMARY KEY,
       ticker TEXT NOT NULL,
-      tactical_score REAL
+      tactical_score REAL,
+      compounder_score REAL,
+      actionability_state TEXT,
+      warnings TEXT
     );
   `);
 
@@ -75,9 +78,9 @@ function seed(): void {
     180.55,
   );
 
-  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score) VALUES (?, ?, ?)').run(1, 'AAPL', 70);
-  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score) VALUES (?, ?, ?)').run(2, 'MSFT', 88);
-  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score) VALUES (?, ?, ?)').run(3, 'TSLA', 75);
+  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score, compounder_score, actionability_state, warnings) VALUES (?, ?, ?, ?, ?, ?)').run(1, 'AAPL', 70, 85, 'fresh_actionable', '["high_valuation"]');
+  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score, compounder_score, actionability_state, warnings) VALUES (?, ?, ?, ?, ?, ?)').run(2, 'MSFT', 88, 90, 'fresh_actionable', '[]');
+  db.prepare('INSERT INTO score_snapshots (id, ticker, tactical_score, compounder_score, actionability_state, warnings) VALUES (?, ?, ?, ?, ?, ?)').run(3, 'TSLA', 75, 60, 'stale', '[]');
 
   db.close();
 }
@@ -144,5 +147,25 @@ describe('insights routes', () => {
     const json = (await response.json()) as {items: unknown[]; meta?: {status: string}};
     assert.equal(json.items.length, 0);
     assert.equal(json.meta?.status, 'unavailable');
+  });
+
+  it('returns 404 for unknown ticker insights', async () => {
+    const response = await fetch(`${baseUrl}/api/insights/UNKNOWN`);
+    assert.equal(response.status, 404);
+  });
+
+  it('returns ticker insights modules for valid ticker', async () => {
+    const response = await fetch(`${baseUrl}/api/insights/AAPL`);
+    assert.equal(response.status, 200);
+    const json = (await response.json()) as {ticker: string; modules: any[]};
+    assert.equal(json.ticker, 'AAPL');
+    assert.ok(json.modules.length >= 1, 'Should return at least one module (snapshot)');
+    
+    const snapshotModule = json.modules.find(m => m.title === 'SNAPSHOT');
+    assert.ok(snapshotModule);
+    assert.equal(snapshotModule.kind, 'kpi');
+    
+    const priceKpi = snapshotModule.items.find((k: any) => k.label === 'PRICE');
+    assert.ok(priceKpi.value.includes('200.12'));
   });
 });

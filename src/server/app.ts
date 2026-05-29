@@ -1467,6 +1467,110 @@ function registerApiRoutes(app: Express): void {
       }
     },
   );
+
+  app.get(
+    '/api/insights/:ticker',
+    async (
+      req: Request<SecurityTickerParams>,
+      res: Response,
+    ) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+      
+      let db: ReturnType<typeof openResearchDb> | null = null;
+      try {
+        db = openResearchDb();
+        const row = db.prepare(`
+          SELECT s.ticker, s.name, s.exchange, s.sector, f.current_price, f.market_cap,
+                 ss.compounder_score, ss.tactical_score, ss.actionability_state, ss.warnings
+          FROM securities s
+          LEFT JOIN fundamentals f ON s.ticker = f.ticker
+          LEFT JOIN score_snapshots ss ON ss.id = (
+            SELECT MAX(inner_ss.id) FROM score_snapshots inner_ss WHERE inner_ss.ticker = s.ticker
+          )
+          WHERE s.ticker = ?
+        `).get(ticker) as any;
+        
+        if (!row) {
+          return res.status(404).json({error: 'Unknown ticker'});
+        }
+
+        const modules: any[] = [];
+        
+        // Quote / Snapshot Module
+        modules.push({
+          kind: 'kpi',
+          title: 'SNAPSHOT',
+          items: [
+            { label: 'PRICE', value: row.current_price ? '$' + row.current_price.toFixed(2) : '—' },
+            { label: 'MKT CAP', value: row.market_cap ? '$' + (row.market_cap / 1e9).toFixed(1) + 'B' : '—' },
+            { label: 'COMPOUNDER SCORE', value: row.compounder_score ? Math.round(row.compounder_score).toString() : '—' },
+            { label: 'TACTICAL SCORE', value: row.tactical_score ? Math.round(row.tactical_score).toString() : '—' },
+          ]
+        });
+
+        // Overview / Thesis Module
+        modules.push({
+          kind: 'narrative',
+          title: 'THESIS',
+          markdown: row.actionability_state 
+            ? 'Actionability State: **' + row.actionability_state + '**'
+            : 'No thesis available.'
+        });
+
+        // Risks Module
+        const warnings = parseJsonStringArray(row.warnings);
+        if (warnings && warnings.length > 0) {
+          modules.push({
+            kind: 'list',
+            title: 'RISKS',
+            items: warnings
+          });
+        }
+
+        // Fetch News
+        const finnhubKey = process.env.FINNHUB_API_KEY;
+        if (finnhubKey) {
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const url = new URL('https://finnhub.io/api/v1/company-news');
+            url.searchParams.set('symbol', ticker);
+            url.searchParams.set('from', weekAgo);
+            url.searchParams.set('to', today);
+            url.searchParams.set('token', finnhubKey);
+            const response = await fetch(url);
+            const newsData = (await response.json()) as FinnhubNewsItem[];
+            if (newsData && Array.isArray(newsData) && newsData.length > 0) {
+              modules.push({
+                kind: 'list',
+                title: 'EVENTS',
+                items: newsData.slice(0, 5).map((item: any) => '[' + item.source + '] ' + item.headline)
+              });
+            }
+          } catch (e) {
+            console.error('Failed to fetch news for insights:', e);
+          }
+        }
+        
+        return res.json({
+          ticker: row.ticker,
+          name: row.name,
+          exchange: row.exchange,
+          sector: row.sector,
+          generatedAt: new Date().toISOString(),
+          modules
+        });
+      } catch (error) {
+        console.error('Ticker insights error:', error);
+        return res.status(500).json({error: 'Failed to fetch insights'});
+      } finally {
+        if (db) db.close();
+      }
+    }
+  );
 }
 
 const YAHOO_HEADERS: HeadersInit = {
