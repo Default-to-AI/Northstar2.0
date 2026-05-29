@@ -16,7 +16,7 @@ export function openResearchDb(): Database.Database {
   const dbPath = resolveResearchDbPath();
   if (!fs.existsSync(dbPath)) {
     throw new Error(
-      `Northstar research DB not found at ${dbPath}. Ensure data/northstar.db is bundled (vercel.json includeFiles) or set NORTHSTAR_DB_PATH.`,
+      `Northstar research DB not found at ${dbPath}. Ensure data/northstar.db is bundled (vercel.json includeFiles) or set NORTHSTAR_DB_PATH. To create it locally: npm run test:py or python3 scripts/run-pipeline.py.`,
     );
   }
 
