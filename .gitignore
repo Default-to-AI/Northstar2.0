@@ -19,3 +19,4 @@ opencode.jsonc
 !.env.example
 .vercel
 *.db
+!data/*.db
