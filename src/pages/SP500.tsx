@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { StockLogo } from '@/components/ui/StockLogo';
 import { cn } from '@/lib/utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,6 +86,34 @@ const fmt = {
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function CompanyLogo({ ticker }: { ticker: string }) {
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [ticker]);
+
+  if (error) {
+    return (
+      <div className="w-6 h-6 rounded bg-[#2a2b36] flex items-center justify-center font-bold text-white text-[10px] shrink-0">
+        {ticker.charAt(0)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-6 h-6 rounded bg-white flex items-center justify-center overflow-hidden shrink-0 p-0.5">
+      <img 
+        src={`https://img.logo.dev/ticker/${ticker}?token=pk_CyCNK430RpK33Qe6o3xFlw&size=60`} 
+        alt={`${ticker} logo`} 
+        className="w-full h-full object-contain"
+        onError={() => setError(true)}
+        loading="lazy"
+      />
+    </div>
+  );
+}
 
 function ScoreBar({ value, color }: { value: number | null; color: string }) {
   const s = fmt.score(value);
@@ -390,6 +417,7 @@ export default function SP500() {
             <thead className="sticky top-0 z-10 bg-[#09090f] border-b border-border">
               <tr>
                 <th className="px-3 py-3 text-left text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground w-8">#</th>
+                <th className="px-3 py-3 text-left w-12"></th>
                 <Th label="Ticker"    sortKey="ticker"         currentSort={sort} currentOrder={order} onSort={handleSort} />
                 <th className="px-3 py-3 text-left text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">Company</th>
                 <th className="px-3 py-3 text-left text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">Sector</th>
@@ -417,8 +445,10 @@ export default function SP500() {
                   >
                     <td className="px-3 py-2.5 text-[10px] font-mono text-muted-foreground/50 tabular-nums">{rowNum}</td>
                     <td className="px-3 py-2.5">
+                      <CompanyLogo ticker={item.ticker} />
+                    </td>
+                    <td className="px-3 py-2.5">
                       <div className="flex items-center gap-2">
-                        <StockLogo ticker={item.ticker} className="w-5 h-5 rounded-[2px]" fallbackSize={10} />
                         <span className="font-mono font-bold text-primary italic text-[13px]">{item.ticker}</span>
                       </div>
                     </td>

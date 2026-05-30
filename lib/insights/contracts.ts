@@ -129,5 +129,6 @@ export type InsightsTickerResponse = {
   sector: string | null;
   generatedAt: string;
   modules: InsightModule[];
+  aggregatedData?: any;
   error?: string;
 };

@@ -1,56 +1,290 @@
-import {useMemo, useState} from 'react';
-import {useParams} from 'react-router-dom';
-import {BarChart3, Loader2, AlertTriangle} from 'lucide-react';
-import {useQuery} from '@tanstack/react-query';
+import React, { useMemo, useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { cn } from '@/lib/utils';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import type {
   InsightsTickerResponse,
   InsightKpiModule,
   InsightNarrativeModule,
   InsightListModule,
-  InsightTableModule,
-  InsightChartModule
+  InsightTableModule
 } from '../../lib/insights/contracts';
 
-function Placeholder({label}: {label: string}) {
-  return (
-    <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-widest mb-3">
-      {label}
-    </div>
-  );
-}
+// --- Components ---
 
-function Section({children, delayMs = 0}: {children: React.ReactNode, delayMs?: number}) {
+function Panel({ children, className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div 
-      className="space-y-2 pt-4 border-t border-border/40 animate-in fade-in slide-in-from-bottom-4 duration-700 fill-mode-both"
-      style={{animationDelay: `${delayMs}ms`}}
-    >
+    <div className={cn("bg-[#1a1b23] border border-[#2a2b36] rounded-xl p-5 shadow-lg", className)} {...props}>
       {children}
     </div>
   );
 }
 
+function PanelTitle({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-[13px] font-semibold text-foreground mb-4">{children}</h3>;
+}
+
+function MissingData() {
+  return <span className="text-rose-500/80 font-mono text-[10px] bg-rose-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">Missing Data</span>;
+}
+
+function CompanyLogo({ ticker, name }: { ticker: string, name: string }) {
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [ticker]);
+
+  if (error) {
+    return (
+      <div className="w-12 h-12 rounded-md bg-[#2a2b36] flex items-center justify-center font-bold text-white text-lg shrink-0">
+        {ticker.charAt(0)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-12 h-12 rounded-md bg-white flex items-center justify-center overflow-hidden shrink-0 p-1">
+      <img 
+        src={`https://img.logo.dev/ticker/${ticker}?token=pk_CyCNK430RpK33Qe6o3xFlw&retina=true`} 
+        alt={`${name} logo`} 
+        className="w-full h-full object-contain"
+        onError={() => setError(true)}
+      />
+    </div>
+  );
+}
+
+// Static mapping for Top 20 companies by Market Cap as a fallback since free APIs don't provide live global rank
+const TOP_MCAP_RANKS: Record<string, number> = {
+  'NVDA': 1, 'MSFT': 2, 'AAPL': 3, 'GOOG': 4, 'GOOGL': 4, 'AMZN': 5,
+  'META': 6, 'BRK-B': 7, 'TSM': 8, 'AVGO': 9, 'LLY': 10, 'JPM': 11,
+  'TSLA': 12, 'WMT': 13, 'V': 14, 'XOM': 15, 'UNH': 16, 'MA': 17,
+  'PG': 18, 'JNJ': 19, 'HD': 20
+};
+
+// Format numbers for Y-Axis (Integers only, with $)
+function formatYAxisTick(num: number) {
+  if (num === 0) return '$0';
+  if (Math.abs(num) >= 1e12) return `$${Math.round(num / 1e12)}T`;
+  if (Math.abs(num) >= 1e9) return `$${Math.round(num / 1e9)}B`;
+  if (Math.abs(num) >= 1e6) return `$${Math.round(num / 1e6)}M`;
+  return `$${Math.round(num)}`;
+}
+
+function formatRelativeTime(dateString: string) {
+  const diffInSeconds = Math.floor((Date.now() - new Date(dateString).getTime()) / 1000);
+  if (diffInSeconds < 60) return `${diffInSeconds} second${diffInSeconds !== 1 ? 's' : ''} ago`;
+  const diffInMinutes = Math.floor(diffInSeconds / 60);
+  if (diffInMinutes < 60) return `${diffInMinutes} minute${diffInMinutes !== 1 ? 's' : ''} ago`;
+  const diffInHours = Math.floor(diffInMinutes / 60);
+  if (diffInHours < 24) return `${diffInHours} hour${diffInHours !== 1 ? 's' : ''} ago`;
+  const diffInDays = Math.floor(diffInHours / 24);
+  return `${diffInDays} day${diffInDays !== 1 ? 's' : ''} ago`;
+}
+
+// Format numbers for generic large values (e.g. Market Cap)
+function formatLargeNumber(num: number) {
+  if (num === 0) return '0';
+  if (Math.abs(num) >= 1e12) return `${(num / 1e12).toFixed(2)}T`;
+  if (Math.abs(num) >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
+  if (Math.abs(num) >= 1e6) return `${(num / 1e6).toFixed(2)}M`;
+  return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function getMetricColor(value: number | undefined | null, metricType: string) {
+  if (value === undefined || value === null) return 'text-white';
+  
+  if (metricType === 'piotroski') {
+    if (value >= 7) return 'text-emerald-400';
+    if (value >= 4) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'peg') {
+    if (value < 1.0) return 'text-emerald-400';
+    if (value <= 1.5) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'roe') {
+    if (value > 20) return 'text-emerald-400';
+    if (value >= 10) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'roa') {
+    if (value > 15) return 'text-emerald-400';
+    if (value >= 5) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'evRevenue') {
+    if (value < 3) return 'text-emerald-400';
+    if (value <= 10) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'yield') {
+    if (value >= 0.05) return 'text-emerald-400';
+    if (value >= 0.02) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'sbcImpact') {
+    if (value < 10) return 'text-emerald-400';
+    if (value <= 20) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'margin') {
+    if (value >= 20) return 'text-emerald-400';
+    if (value >= 5) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'growth') {
+    if (value >= 15) return 'text-emerald-400';
+    if (value >= 0) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'divYield') {
+    if (value >= 3) return 'text-emerald-400';
+    if (value >= 1) return 'text-amber-400';
+    return 'text-white';
+  }
+  if (metricType === 'payoutRatio') {
+    if (value < 50) return 'text-emerald-400';
+    if (value <= 75) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  return 'text-white';
+}
+
+function CustomTooltip({ active, payload, label }: any) {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-[#1a1b23] border border-[#2a2b36] p-3 rounded-lg shadow-2xl text-[13px] min-w-[140px] relative">
+        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-[#1a1b23] border-b border-r border-[#2a2b36] rotate-45"></div>
+        <p className="font-bold text-white mb-2">{label}</p>
+        {payload.map((p: any, i: number) => (
+          <div key={i} className="flex items-center gap-2 font-medium">
+             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: p.color }}></div>
+             <span className="text-white">${formatLargeNumber(p.value)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+}
+
+// Chart Configurations mapping Title to data key and style
+const CHART_CONFIGS: Record<string, { dataKey: string; type: 'area' | 'bar'; color: string; fillOpacity: number }> = {
+  'Revenue': { dataKey: 'revenue', type: 'bar', color: '#0ea5e9', fillOpacity: 1 },
+  'EBITDA': { dataKey: 'ebitda', type: 'bar', color: '#8b5cf6', fillOpacity: 1 },
+  'Net Income': { dataKey: 'netIncome', type: 'bar', color: '#10b981', fillOpacity: 1 },
+  'Free Cash Flow': { dataKey: 'fcf', type: 'bar', color: '#3b82f6', fillOpacity: 1 },
+  'EPS': { dataKey: 'eps', type: 'area', color: '#f59e0b', fillOpacity: 0.2 },
+  'Shares Outstanding': { dataKey: 'shares', type: 'area', color: '#6366f1', fillOpacity: 0.2 },
+  'Cash & Debt': { dataKey: 'cash', type: 'bar', color: '#10b981', fillOpacity: 1 },
+  'Dividends': { dataKey: 'dividends', type: 'bar', color: '#f43f5e', fillOpacity: 1 },
+  'Return Of Capital': { dataKey: 'repurchases', type: 'bar', color: '#ec4899', fillOpacity: 1 },
+};
+
+function MiniChart({ data, configKey }: { data: any[], configKey: string }) {
+  const config = CHART_CONFIGS[configKey];
+  if (!config || !data || data.length === 0) return <MissingData />;
+
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      {config.type === 'bar' ? (
+        <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+          <XAxis dataKey="period" stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
+          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
+          <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
+          <Bar dataKey={config.dataKey} fill={config.color} radius={[2, 2, 0, 0]} />
+        </BarChart>
+      ) : (
+        <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+          <XAxis dataKey="period" stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
+          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
+          <Tooltip content={<CustomTooltip />} />
+          <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
+        </AreaChart>
+      )}
+    </ResponsiveContainer>
+  );
+}
+
+function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], fullData: any[], configKey: string, isAnnual: boolean }) {
+  const config = CHART_CONFIGS[configKey];
+  if (!config || !data || data.length === 0) return <div className="flex items-center justify-center h-full"><MissingData /></div>;
+
+  const currentVal = fullData[fullData.length - 1]?.[config.dataKey];
+  
+  const calculateGrowth = (years: number) => {
+    const offset = isAnnual ? years : years * 4;
+    if (fullData.length <= offset) return null;
+    const pastVal = fullData[fullData.length - 1 - offset]?.[config.dataKey];
+    if (!pastVal || pastVal <= 0 || !currentVal || currentVal <= 0) return null;
+    const cagr = (Math.pow(currentVal / pastVal, 1 / years) - 1) * 100;
+    return cagr.toFixed(2);
+  };
+
+  const cagr1 = calculateGrowth(1);
+  const cagr3 = calculateGrowth(3);
+  const cagr5 = calculateGrowth(5);
+
+  return (
+    <div className="w-full h-full flex flex-col">
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          {config.type === 'bar' ? (
+            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <XAxis dataKey="period" stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
+              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
+              <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
+              <Bar dataKey={config.dataKey} fill={config.color} radius={[4, 4, 0, 0]} />
+            </BarChart>
+          ) : (
+            <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <XAxis dataKey="period" stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
+              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
+              <Tooltip content={<CustomTooltip />} />
+              <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
+            </AreaChart>
+          )}
+        </ResponsiveContainer>
+      </div>
+      {(cagr1 || cagr3 || cagr5) && (
+        <div className="flex gap-3 justify-center pb-4 pt-2">
+          {cagr1 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">1Y: {cagr1}%</span>}
+          {cagr3 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">3Y: {cagr3}%</span>}
+          {cagr5 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">5Y: {cagr5}%</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// --- Main Page Component ---
+
 export default function InsightsTicker() {
-  const {ticker = ''} = useParams<{ticker: string}>();
+  const { ticker = '' } = useParams<{ ticker: string }>();
   const normalizedTicker = useMemo(() => ticker.trim().toUpperCase(), [ticker]);
-  
-  const [timeframe, setTimeframe] = useState<'Quarterly' | 'TTM' | 'Annually'>('Annually');
-  
-  const {data, isLoading, isError, error} = useQuery<InsightsTickerResponse>({
+  const [timeframe, setTimeframe] = useState<'Quarterly' | 'TTM' | 'Annually'>('Quarterly');
+  const [selectedChart, setSelectedChart] = useState<string | null>(null);
+  const [expandedTimeframe, setExpandedTimeframe] = useState<'One Year' | 'Two Years' | 'Three Years' | 'Five Years' | 'Ten Years' | 'All'>('Five Years');
+
+  // --- Data Fetching ---
+  const { data, isLoading, isError } = useQuery<InsightsTickerResponse>({
     queryKey: ['insights-ticker', normalizedTicker],
     queryFn: async () => {
       const res = await fetch(`/api/insights/${normalizedTicker}`);
-      if (!res.ok) {
-        if (res.status === 404) throw new Error('Unknown ticker');
-        throw new Error('Failed to fetch insights');
-      }
+      if (!res.ok) throw new Error('Failed to fetch insights');
       return res.json();
     },
     enabled: normalizedTicker.length > 0,
   });
 
-  const {data: tradesData} = useQuery<InsightTableModule>({
+  const { data: tradesData } = useQuery<InsightTableModule>({
     queryKey: ['insights-trades', normalizedTicker],
     queryFn: async () => {
       const res = await fetch(`/api/insights/${normalizedTicker}/insider-trades`);
@@ -60,7 +294,7 @@ export default function InsightsTicker() {
     enabled: normalizedTicker.length > 0,
   });
 
-  const {data: estimatesData} = useQuery<InsightTableModule>({
+  const { data: estimatesData } = useQuery<InsightTableModule>({
     queryKey: ['insights-estimates', normalizedTicker],
     queryFn: async () => {
       const res = await fetch(`/api/insights/${normalizedTicker}/analyst-estimates`);
@@ -70,246 +304,482 @@ export default function InsightsTicker() {
     enabled: normalizedTicker.length > 0,
   });
 
-  const {data: chartsData} = useQuery<InsightChartModule>({
-    queryKey: ['insights-charts', normalizedTicker, timeframe],
-    queryFn: async () => {
-      const res = await fetch(`/api/insights/${normalizedTicker}/charts?timeframe=${timeframe}`);
-      if (!res.ok) throw new Error('Failed to fetch charts');
-      return res.json();
-    },
-    enabled: normalizedTicker.length > 0,
-  });
-
-  const displayTicker = data?.ticker ?? (normalizedTicker.length > 0 ? normalizedTicker : 'UNKNOWN');
-
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full text-muted-foreground p-12">
-        <Loader2 className="animate-spin w-8 h-8" />
-      </div>
-    );
+    return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>;
   }
-
   if (isError) {
-    return (
-      <div className="p-6 max-w-[1200px] mx-auto text-center space-y-4 pt-12">
-        <AlertTriangle className="mx-auto w-12 h-12 text-destructive" />
-        <h2 className="text-xl font-mono text-destructive">Error Loading Insights</h2>
-        <p className="text-muted-foreground">{error instanceof Error ? error.message : 'An unknown error occurred.'}</p>
-      </div>
-    );
+    return <div className="p-12 text-center text-destructive"><AlertTriangle className="mx-auto w-12 h-12 mb-4" />Error Loading Insights</div>;
   }
 
-  const snapshotModule = data?.modules.find(m => m.title === 'SNAPSHOT') as InsightKpiModule | undefined;
+  // --- Data Extraction ---
   const thesisModule = data?.modules.find(m => m.title === 'THESIS') as InsightNarrativeModule | undefined;
   const risksModule = data?.modules.find(m => m.title === 'RISKS') as InsightListModule | undefined;
-  const eventsModule = data?.modules.find(m => m.title === 'EVENTS') as InsightListModule | undefined;
+  
+  const snapshotModule = data?.modules.find(m => m.title === 'SNAPSHOT') as InsightKpiModule | undefined;
+  const getMetric = (label: string) => snapshotModule?.items.find(i => i.label === label)?.value || '—';
 
-  const priceItem = snapshotModule?.items.find(i => i.label === 'PRICE');
-  const mktCapItem = snapshotModule?.items.find(i => i.label === 'MKT CAP');
-  const qualityItem = snapshotModule?.items.find(i => i.label === 'COMPOUNDER SCORE');
-  const momentumItem = snapshotModule?.items.find(i => i.label === 'TACTICAL SCORE');
+  const agg = data?.aggregatedData || {};
+  
+  const currentChartData = timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
 
   return (
-    <div className="p-6 space-y-8 max-w-[1200px] mx-auto overflow-y-auto h-full pb-12">
-      {/* Consolidated Header / Hero */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-border">
-        <div className="space-y-2">
-          <div className="text-[11px] text-muted-foreground uppercase tracking-widest font-mono flex items-center gap-2 mb-2">
-            <BarChart3 size={14} /> Ticker Insights
-          </div>
-          <h1 className="text-3xl font-mono font-bold text-primary italic leading-none">{displayTicker}</h1>
-          <div className="text-[14px] text-foreground">{data?.name || 'UNKNOWN COMPANY'}</div>
-          <div className="text-[11px] text-muted-foreground font-mono uppercase tracking-widest">
-            {data?.exchange || 'UNKNOWN'} · {data?.sector || 'UNKNOWN'}
-          </div>
-        </div>
-        <div className="text-left md:text-right flex gap-8">
-          <div>
-            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Last</div>
-            <div className="text-2xl font-mono font-bold text-foreground">{priceItem?.value || '—'}</div>
-          </div>
-          <div>
-            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1">Mkt Cap</div>
-            <div className="text-2xl font-mono font-bold text-foreground">{mktCapItem?.value || '—'}</div>
-          </div>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
-        {/* Main column */}
-        <div className="lg:col-span-8 space-y-8">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-            <Section delayMs={100}>
-              <Placeholder label="THESIS" />
-              <div className="text-[13px] text-foreground/90 leading-relaxed">
-                {thesisModule ? (
-                  <div dangerouslySetInnerHTML={{ __html: thesisModule.markdown.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }} />
-                ) : (
-                  'No thesis available.'
-                )}
-              </div>
-            </Section>
-
-            <Section delayMs={200}>
-              <Placeholder label="ANALYST ESTIMATES" />
-              <div className="text-[13px] text-foreground/90 leading-relaxed">
-                {estimatesData ? (
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="text-[10px] text-muted-foreground border-b border-border/40">
-                        {estimatesData.columns.map(c => <th key={c.key} className="pb-2 font-normal">{c.label}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody className="font-mono text-[12px]">
-                      {estimatesData.rows.map((row) => (
-                        <tr key={row.key} className="border-b border-border/10 last:border-0">
-                          {estimatesData.columns.map(c => <td key={c.key} className="py-2">{row.values[c.key]}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="text-muted-foreground">Loading estimates...</div>
-                )}
-              </div>
-            </Section>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
-            <Section delayMs={300}>
-              <Placeholder label="RISKS" />
-              <div className="text-[13px] text-foreground/90 leading-relaxed space-y-1">
-                {risksModule?.items && risksModule.items.length > 0 ? (
-                  <ul className="list-disc pl-4 space-y-1 text-muted-foreground">
-                    {risksModule.items.map((risk, i) => (
-                      <li key={i}><span className="text-foreground/90">{risk}</span></li>
-                    ))}
-                  </ul>
-                ) : (
-                  'No risks logged.'
-                )}
-              </div>
-            </Section>
-
-            <Section delayMs={400}>
-              <Placeholder label="INSIDER TRADES" />
-              <div className="text-[13px] text-foreground/90 leading-relaxed overflow-x-auto">
-                {tradesData ? (
-                  <table className="w-full text-left whitespace-nowrap">
-                    <thead>
-                      <tr className="text-[10px] text-muted-foreground border-b border-border/40">
-                        {tradesData.columns.map(c => <th key={c.key} className="pb-2 font-normal pr-4">{c.label}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody className="font-mono text-[11px]">
-                      {tradesData.rows.map((row) => (
-                        <tr key={row.key} className="border-b border-border/10 last:border-0">
-                          {tradesData.columns.map(c => (
-                            <td key={c.key} className={`py-2 pr-4 ${c.key === 'type' ? (row.values[c.key] === 'Buy' ? 'text-green-500' : 'text-red-500') : ''}`}>
-                              {row.values[c.key]}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="text-muted-foreground">Loading trades...</div>
-                )}
-              </div>
-            </Section>
-          </div>
-
-          <Section delayMs={500}>
-            <div className="flex items-center justify-between mb-3">
-              <Placeholder label="HISTORICAL FINANCIALS" />
-              <div className="flex gap-2">
-                {['Quarterly', 'TTM', 'Annually'].map(tf => (
-                  <button 
-                    key={tf}
-                    onClick={() => setTimeframe(tf as any)}
-                    className={`text-[10px] uppercase font-mono tracking-widest px-2 py-1 ${timeframe === tf ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'}`}
-                  >
-                    {tf}
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              {chartsData ? chartsData.series.map((series) => (
-                <div key={series.key} className="space-y-2">
-                  <div className="text-[11px] font-mono text-muted-foreground">{series.label}</div>
-                  <div className="h-24 flex items-end gap-1">
-                    {series.points.map((p, i) => {
-                      const height = p.y ? `${Math.max(10, Math.min(100, (p.y / 200) * 100))}%` : '0%';
-                      return (
-                        <div key={i} className="flex-1 bg-muted group relative hover:bg-primary/50 transition-colors" style={{height}}>
-                          <div className="opacity-0 group-hover:opacity-100 absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-[9px] px-1 whitespace-nowrap pointer-events-none">
-                            {p.x}: {p.y ? p.y.toFixed(1) : '—'}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+    <div className="bg-[#0f1015] min-h-screen text-foreground p-6 space-y-6 overflow-y-auto">
+      
+      {/* Chart Modal */}
+      {selectedChart && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8" onClick={() => setSelectedChart(null)}>
+          <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-xl w-full max-w-6xl h-[80vh] flex flex-col p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-8">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-lg">
+                  {normalizedTicker.charAt(0)}
                 </div>
-              )) : (
-                <div className="text-muted-foreground text-[12px]">Loading charts...</div>
-              )}
+                <h2 className="text-lg font-bold text-white">{selectedChart} - {normalizedTicker}</h2>
+              </div>
+              <div className="flex gap-2 items-center">
+                <div className="relative">
+                  <select 
+                    className="appearance-none bg-[#0f1015] border border-[#2a2b36] text-white text-sm rounded px-3 py-1.5 pr-8 focus:outline-none cursor-pointer"
+                    value={expandedTimeframe}
+                    onChange={e => setExpandedTimeframe(e.target.value as any)}
+                  >
+                    <option value="One Year">One Year</option>
+                    <option value="Three Years">Three Years</option>
+                    <option value="Five Years">Five Years</option>
+                    <option value="All">All</option>
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                </div>
+                <button className="bg-[#0f1015] border border-[#2a2b36] p-1.5 rounded hover:bg-[#2a2b36] transition-colors"><Download className="w-4 h-4" /></button>
+                <button className="bg-[#0f1015] border border-[#2a2b36] p-1.5 rounded hover:bg-[#2a2b36] transition-colors" onClick={() => setSelectedChart(null)}><X className="w-4 h-4" /></button>
+              </div>
             </div>
-          </Section>
+            <div className="flex-1 border border-[#2a2b36]/50 rounded-lg bg-[#0f1015]/50 overflow-hidden flex flex-col">
+               {CHART_CONFIGS[selectedChart] ? (
+                 <ExpandedChart 
+                   data={currentChartData.slice(
+                     expandedTimeframe === 'One Year' ? - (timeframe === 'Annually' ? 1 : 4) :
+                     expandedTimeframe === 'Three Years' ? - (timeframe === 'Annually' ? 3 : 12) :
+                     expandedTimeframe === 'Five Years' ? - (timeframe === 'Annually' ? 5 : 20) :
+                     0
+                   )} 
+                   fullData={currentChartData}
+                   configKey={selectedChart} 
+                   isAnnual={timeframe === 'Annually'} 
+                 />
+               ) : (
+                 <div className="flex items-center justify-center h-full flex-col gap-4">
+                   <MissingData />
+                   <span className="text-muted-foreground text-sm">Chart not configured for {selectedChart}</span>
+                 </div>
+               )}
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Sidebar column */}
-        <div className="lg:col-span-4 space-y-8">
-          <Section delayMs={600}>
-            <Placeholder label="SNAPSHOT" />
-            <div className="grid grid-cols-2 gap-y-6 gap-x-4">
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono mb-1">QUALITY</div>
-                <div className="text-lg font-mono font-bold text-foreground">{qualityItem?.value || '—'}</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono mb-1">VALUE</div>
-                <div className="text-lg font-mono font-bold text-foreground">—</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono mb-1">GROWTH</div>
-                <div className="text-lg font-mono font-bold text-foreground">—</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-mono mb-1">MOMENTUM</div>
-                <div className="text-lg font-mono font-bold text-foreground">{momentumItem?.value || '—'}</div>
-              </div>
-            </div>
-          </Section>
+      {/* 1. Header Area */}
+      <div className="relative">
+        <div className="absolute top-0 right-0 flex gap-4 text-[11px] font-mono text-muted-foreground bg-[#1a1b23] px-3 py-1.5 rounded-bl-lg border-b border-l border-[#2a2b36]">
+          <span>Dow Jones <MissingData /></span>
+          <span>S&P 500 <MissingData /></span>
+          <span>Nasdaq <MissingData /></span>
+        </div>
+        
+        <div className="flex flex-col items-center justify-center pt-8 pb-4">
+          <div className="relative w-96 mb-6">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input 
+              type="text" 
+              placeholder={normalizedTicker} 
+              className="w-full bg-[#1a1b23] border border-[#2a2b36] rounded-md py-2 pl-10 pr-10 text-sm focus:outline-none focus:border-primary/50"
+              readOnly
+            />
+            <Star className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground cursor-pointer hover:text-yellow-400" />
+          </div>
 
-          <Section delayMs={700}>
-            <Placeholder label="EVENTS" />
-            <div className="text-[13px] text-foreground/90 leading-relaxed">
-              {eventsModule?.items && eventsModule.items.length > 0 ? (
-                <ul className="space-y-3">
-                  {eventsModule.items.map((event, i) => (
-                    <li key={i} className="text-muted-foreground">
-                      <span className="text-foreground/90 block leading-tight">{event}</span>
-                    </li>
-                  ))}
-                </ul>
+          <div className="flex flex-col items-center gap-2 mb-6">
+            <div className="text-[11px] text-muted-foreground font-mono bg-emerald-500/10 text-emerald-400/90 px-3 py-1.5 rounded-full border border-emerald-500/20 flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              {data?.generatedAt ? (
+                <>Last Data Refresh: {formatRelativeTime(data.generatedAt)}</>
               ) : (
-                'No events available.'
+                <>Last Data Refresh: <MissingData /></>
               )}
             </div>
-          </Section>
+            <button 
+              onClick={async () => {
+                try {
+                  await fetch(`/api/insights/${normalizedTicker}/refresh`, { method: 'POST' });
+                  window.location.reload();
+                } catch (e) {
+                  console.error('Failed to refresh cache', e);
+                }
+              }}
+              className="text-[10px] text-muted-foreground hover:text-white underline underline-offset-2 transition-colors cursor-pointer"
+            >
+              Clear Cache & Refresh
+            </button>
+          </div>
 
-          <Section delayMs={800}>
-            <Placeholder label="DISCLOSURE" />
-            <div className="text-[11px] text-muted-foreground leading-relaxed">
-              PLACEHOLDER: Data sources & limitations. This information is provided for educational purposes only.
+          <div className="flex items-center gap-4 mb-4">
+            <CompanyLogo ticker={normalizedTicker} name={agg?.profile?.name || data?.name || 'Company'} />
+            <div className="text-center md:text-left">
+              <h1 className="text-xl font-semibold text-white">{agg?.profile?.name || data?.name || 'Unknown Company'}</h1>
+              <div className="text-sm text-muted-foreground">{normalizedTicker} | {agg?.profile?.exchange || data?.exchange || 'NASDAQ'}</div>
             </div>
-          </Section>
+          </div>
+
+          <div className="text-center space-y-1">
+            <div className="flex items-baseline justify-center gap-2">
+              <span className="text-2xl font-bold text-white">
+                {agg?.quote?.price ? `$${agg.quote.price.toFixed(2)}` : (getMetric('PRICE') !== '—' ? getMetric('PRICE') : <MissingData />)}
+              </span>
+              {agg?.quote?.change ? (
+                <span className={cn("text-[11px] px-2 py-0.5 rounded font-medium", agg.quote.change >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
+                  {agg.quote.change >= 0 ? '+' : ''}{agg.quote.change.toFixed(2)} | {agg.quote.changePercent?.toFixed(2)}%
+                </span>
+              ) : <MissingData />}
+            </div>
+            <div className="text-[11px] text-muted-foreground flex items-center justify-center gap-2">
+              <span>After hours:</span> 
+              {agg?.quote?.afterHoursPrice ? (
+                <>
+                  <span className="text-foreground">${agg.quote.afterHoursPrice.toFixed(2)}</span>
+                  {agg?.quote?.afterHoursChange && (
+                    <span className={agg.quote.afterHoursChange >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                      {agg.quote.afterHoursChange >= 0 ? '+' : ''}{agg.quote.afterHoursChange.toFixed(2)} | {agg.quote.afterHoursChangePercent?.toFixed(2)}%
+                    </span>
+                  )}
+                </>
+              ) : <MissingData />}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* 2. Brief */}
+      <Panel className="text-center flex flex-col items-center">
+        <h3 className="text-[14px] font-semibold text-white mb-1">Brief</h3>
+        <p className="text-[12px] text-muted-foreground mb-4">A summary of key recent developments</p>
+        <div className="text-[13px] text-foreground/90 space-y-2 max-w-4xl w-full">
+          {thesisModule ? (
+             <div dangerouslySetInnerHTML={{ __html: thesisModule.markdown }} />
+          ) : (
+            <MissingData />
+          )}
+          <div className="mt-4 pt-4 border-t border-[#2a2b36]/50 w-full">
+            <span className="font-semibold text-white">Actionability State:</span> <strong>{agg?.actionabilityState || 'fresh_actionable'}</strong>
+          </div>
+        </div>
+      </Panel>
+
+      {/* 3. Financial Metrics Grid */}
+      <Panel className="py-6 overflow-x-auto">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-8 text-[12px] min-w-[800px]">
+          <div className="space-y-2 border-r border-[#2a2b36] pr-6">
+            <h4 className="font-semibold text-white mb-4">Valuation</h4>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">Market Cap:</span> 
+              <span>
+                {agg?.valuation?.marketCap ? `$${formatLargeNumber(agg.valuation.marketCap)}` : <MissingData />}
+                {TOP_MCAP_RANKS[ticker!] && <span className="ml-1.5 text-xs text-sky-400 font-bold bg-sky-400/10 px-1 rounded-sm">(#{TOP_MCAP_RANKS[ticker!]})</span>}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">P/E (TTM):</span>
+              <span className="flex items-center gap-1">
+                {agg?.valuation?.pe?.ttm ? agg.valuation.pe.ttm.toFixed(2) : <MissingData />}
+                {agg?.valuation?.normalizationEvents?.some((e: any) => e.metric === 'PE_TTM') && (
+                  <span title={`Cross-source deviation >2% — using median. ${agg.valuation.normalizationEvents.filter((e: any) => e.metric === 'PE_TTM').map((e: any) => `${e.outlierSource}: ${e.deviation.toFixed(2)}%`).join(', ')}`} className="text-amber-400 cursor-help text-[10px]">⚠</span>
+                )}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">P/E (NTM):</span>
+              <span>{agg?.valuation?.pe?.ntm ? agg.valuation.pe.ntm.toFixed(2) : <MissingData />}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">P/E (2027E):</span>
+              <span className="flex items-center gap-1">
+                {agg?.valuation?.pe?.fy2027 ? agg.valuation.pe.fy2027.toFixed(2) : <MissingData />}
+                {agg?.valuation?.pe?.fy2027 && <span className="text-[9px] text-muted-foreground ml-0.5" title="Extrapolated from long-term growth rate applied to NTM EPS">est.</span>}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground">EV/EBITDA (TTM):</span>
+              <span className="flex items-center gap-1">
+                {agg?.valuation?.evEbitda ? agg.valuation.evEbitda.toFixed(2) : <MissingData />}
+                {agg?.valuation?.normalizationEvents?.some((e: any) => e.metric === 'EV_EBITDA') && (
+                  <span title={`Cross-source deviation >2% — using median. ${agg.valuation.normalizationEvents.filter((e: any) => e.metric === 'EV_EBITDA').map((e: any) => `${e.outlierSource}: ${e.deviation.toFixed(2)}%`).join(', ')}`} className="text-amber-400 cursor-help text-[10px]">⚠</span>
+                )}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-muted-foreground text-[11px]">EV/EBITDA (SBC Adj.):</span>
+              <span className="flex items-center gap-1">
+                {agg?.valuation?.evEbitdaNormalized ? agg.valuation.evEbitdaNormalized.toFixed(2) : <MissingData />}
+                {agg?.valuation?.sbcAddBack && <span className="text-[9px] text-emerald-400/70 ml-0.5" title={`SBC add-back: $${formatLargeNumber(agg.valuation.sbcAddBack)}`}>+SBC</span>}
+              </span>
+            </div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price To Sales (TTM):</span> <span>{agg?.valuation?.ps ? agg.valuation.ps.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price to Book (MRQ):</span> <span>{agg?.valuation?.pb ? agg.valuation.pb.toFixed(2) : <MissingData />}</span></div>
+            {agg?.valuation?.normalizationEvents && agg.valuation.normalizationEvents.length > 0 && (
+              <div className="mt-3 pt-2 border-t border-amber-500/20">
+                <div className="flex items-center gap-1 text-[10px] text-amber-400 font-semibold mb-1">
+                  <span>⚠</span> Data Quality ({agg.valuation.normalizationEvents.length} event{agg.valuation.normalizationEvents.length > 1 ? 's' : ''})
+                </div>
+                {agg.valuation.normalizationEvents.slice(0, 3).map((evt: any, idx: number) => (
+                  <div key={idx} className="text-[9px] text-muted-foreground leading-tight">
+                    {evt.note ? (
+                      <span className={evt.metric === 'SBC_ADJUSTMENT' && evt.outlierSource !== 'FMP Fallback' ? "text-emerald-400" : "text-amber-400"}>
+                        {evt.metric}: {evt.note}
+                      </span>
+                    ) : (
+                      `${evt.metric}: ${evt.outlierSource} deviated ${evt.deviation.toFixed(1)}% from median (${evt.median.toFixed(2)})`
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="space-y-2 border-r border-[#2a2b36] pr-6">
+            <h4 className="font-semibold text-white mb-4">Advanced Ratios</h4>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">PEG Ratio (TTM):</span> <span className={getMetricColor(agg?.ratios?.pegRatio, 'peg')}>{agg?.ratios?.pegRatio !== undefined ? agg.ratios.pegRatio.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Equity (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnEquity, 'roe')}>{agg?.ratios?.returnOnEquity !== undefined ? `${agg.ratios.returnOnEquity.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Assets (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnAssets, 'roa')}>{agg?.ratios?.returnOnAssets !== undefined ? `${agg.ratios.returnOnAssets.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">EV to Revenue (TTM):</span> <span className={getMetricColor(agg?.ratios?.evToRevenue, 'evRevenue')}>{agg?.ratios?.evToRevenue !== undefined ? agg.ratios.evToRevenue.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore !== undefined && agg?.ratios?.piotroskiScore !== null ? `${agg.ratios.piotroskiScore}/9` : <MissingData />}</span></div>
+          </div>
+          <div className="space-y-2 border-r border-[#2a2b36] pr-6">
+            <h4 className="font-semibold text-white mb-4">Cash Flow</h4>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Yield (TTM):</span> <span className={getMetricColor(agg?.cashFlow?.fcfYield, 'yield')}>{agg?.cashFlow?.fcfYield !== undefined ? `${(agg.cashFlow.fcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Per Share / Price:</span> <span>{agg?.ratios?.freeCashFlowPerShare !== undefined && agg?.quote?.price ? `${agg.ratios.freeCashFlowPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Adj. FCF Yield:</span> <span className={getMetricColor(agg?.cashFlow?.adjFcfYield, 'yield')}>{agg?.cashFlow?.adjFcfYield !== undefined ? `${(agg.cashFlow.adjFcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground text-[10px]">Adj. FCF Per Share / Price:</span> <span>{agg?.cashFlow?.adjFcfPerShare !== undefined && agg?.quote?.price ? `${agg.cashFlow.adjFcfPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Impact:</span> <span className={getMetricColor(agg?.cashFlow?.sbcImpact, 'sbcImpact')}>{agg?.cashFlow?.sbcImpact !== undefined ? `${agg.cashFlow.sbcImpact.toFixed(2)}%` : <MissingData />}</span></div>
+          </div>
+          <div className="space-y-2 border-r border-[#2a2b36] pr-6">
+            <h4 className="font-semibold text-white mb-4">Margins & Growth</h4>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Profit Margins (TTM):</span> <span className={getMetricColor(agg?.margins?.profitMargin, 'margin')}>{agg?.margins?.profitMargin !== undefined ? `${agg.margins.profitMargin.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Operating Margin (TTM):</span> <span className={getMetricColor(agg?.margins?.operatingMargin, 'margin')}>{agg?.margins?.operatingMargin !== undefined ? `${agg.margins.operatingMargin.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Earnings YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qEarningsYoY, 'growth')}>{agg?.margins?.qEarningsYoY !== undefined ? `${agg.margins.qEarningsYoY.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Revenue YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qRevenueYoY, 'growth')}>{agg?.margins?.qRevenueYoY !== undefined ? `${agg.margins.qRevenueYoY.toFixed(2)}%` : <MissingData />}</span></div>
+          </div>
+          <div className="space-y-2 border-r border-[#2a2b36] pr-6">
+            <h4 className="font-semibold text-white mb-4">Balance</h4>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Cash (MRQ):</span> <span>{agg?.balance?.cash !== undefined ? `$${formatLargeNumber(agg.balance.cash)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Debt (MRQ):</span> <span>{agg?.balance?.debt !== undefined ? `$${formatLargeNumber(agg.balance.debt)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Net Debt (MRQ):</span> <span>{agg?.balance?.netDebt !== undefined ? `$${formatLargeNumber(agg.balance.netDebt)}` : <MissingData />}</span></div>
+          </div>
+          <div className="space-y-2">
+            <h4 className="font-semibold text-white mb-4">Dividend</h4>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Dividend Yield:</span> <span className={getMetricColor(agg?.dividend?.divYield, 'divYield')}>{agg?.dividend?.divYield !== undefined ? `${agg.dividend.divYield.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Ratio:</span> <span className={getMetricColor(agg?.dividend?.payoutRatio, 'payoutRatio')}>{agg?.dividend?.payoutRatio !== undefined ? `${agg.dividend.payoutRatio.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Date:</span> <span>{agg?.dividend?.exDivDate || <MissingData />}</span></div>
+          </div>
+        </div>
+      </Panel>
+
+      {/* 4. Charts Grid */}
+      <div className="space-y-4">
+        <div className="flex justify-center mb-6">
+          <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-1 flex gap-1">
+            {['Quarterly', 'Quarterly (TTM)', 'Annually'].map(tf => {
+              const val = tf === 'Quarterly (TTM)' ? 'TTM' : tf as any;
+              return (
+                <button 
+                  key={tf}
+                  onClick={() => setTimeframe(val)}
+                  className={cn(
+                    "px-4 py-1.5 text-[12px] font-medium rounded-md transition-colors",
+                    timeframe === val ? "bg-sky-500/20 text-sky-400" : "text-muted-foreground hover:text-white"
+                  )}
+                >
+                  {tf}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          {['Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Dividends', 'Return Of Capital'].map((title) => (
+            <Panel 
+              key={title} 
+              className="p-4 h-48 flex flex-col cursor-pointer hover:border-primary/50 transition-colors group"
+              onClick={() => setSelectedChart(title)}
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-semibold text-foreground">{title}</span>
+                </div>
+                <button className="text-muted-foreground group-hover:text-white transition-colors">
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden mt-auto rounded relative">
+                {CHART_CONFIGS[title] ? (
+                  <MiniChart data={currentChartData} configKey={title} />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center bg-[#0f1015]/50 border border-[#2a2b36]/50">
+                    <MissingData />
+                  </div>
+                )}
+              </div>
+            </Panel>
+          ))}
+          
+          {/* Missing/Unconfigured Charts */}
+          {['Price', 'Revenue By Segment', 'Valuation', 'Expenses'].map((title) => (
+            <Panel 
+              key={title} 
+              className="p-4 h-48 flex flex-col cursor-pointer hover:border-primary/50 transition-colors group"
+              onClick={() => setSelectedChart(title)}
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] font-semibold text-foreground">{title}</span>
+                </div>
+                <button className="text-muted-foreground group-hover:text-white transition-colors">
+                  <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex-1 flex items-center justify-center mt-auto bg-[#0f1015]/50 rounded border border-[#2a2b36]/50">
+                <MissingData />
+              </div>
+            </Panel>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. Advantages & Risks */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel>
+          <PanelTitle>Competitive Advantages</PanelTitle>
+          <div className="space-y-4 text-[12px] text-foreground/90 leading-relaxed flex items-center justify-center min-h-[100px]">
+             <MissingData />
+          </div>
+        </Panel>
+        
+        <Panel>
+          <PanelTitle>Investment Risks</PanelTitle>
+          <div className="space-y-4 text-[12px] text-foreground/90 leading-relaxed">
+            {risksModule?.items && risksModule.items.length > 0 ? (
+               risksModule.items.map((r, idx) => <p key={idx}>{r}</p>)
+            ) : (
+              <div className="flex items-center justify-center min-h-[100px]">
+                <MissingData />
+              </div>
+            )}
+          </div>
+        </Panel>
+      </div>
+
+      {/* 6. Profile & Estimates */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel>
+          <PanelTitle>Company Profile</PanelTitle>
+          <div className="space-y-3 text-[12px]">
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">CEO</span> <span>{agg?.profile?.ceo || <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Website</span> {agg?.profile?.website ? <a href={agg.profile.website} className="text-sky-400 hover:underline" target="_blank" rel="noreferrer">{agg.profile.website}</a> : <MissingData />}</div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Sector</span> <span>{agg?.profile?.sector || <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Industry</span> <span>{agg?.profile?.industry || <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Full Time Employees</span> <span>{agg?.profile?.employees ? agg.profile.employees.toLocaleString() : <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Beta</span> <span>{agg?.profile?.beta ? agg.profile.beta.toFixed(3) : <MissingData />}</span></div>
+            <div className="flex justify-between py-1 items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore !== undefined && agg?.ratios?.piotroskiScore !== null ? <span className="font-bold">{agg.ratios.piotroskiScore}/9</span> : <MissingData />}</span></div>
+          </div>
+        </Panel>
+
+        <Panel>
+          <div className="flex justify-between items-center mb-4">
+             <PanelTitle>Analyst Estimates</PanelTitle>
+             <div className="text-[11px] text-muted-foreground flex gap-2"><span className="text-sky-400">EPS</span> <span>Revenue</span></div>
+          </div>
+          <table className="w-full text-[12px] text-left">
+            <thead>
+              <tr className="border-b border-[#2a2b36] text-muted-foreground">
+                <th className="py-2 font-normal"></th>
+                {estimatesData ? estimatesData.rows.map(r => <th key={r.key} className="py-2 font-normal">{r.values.period}</th>) : <th className="py-2 font-normal"><MissingData /></th>}
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="border-b border-[#2a2b36]/50">
+                <td className="py-3 text-muted-foreground">Avg. Estimate (EPS)</td>
+                {estimatesData ? estimatesData.rows.map(r => <td key={r.key}>{r.values.eps}</td>) : <td><MissingData /></td>}
+              </tr>
+              <tr>
+                <td className="py-3 text-muted-foreground">Avg. Estimate (Rev)</td>
+                {estimatesData ? estimatesData.rows.map(r => <td key={r.key}>{r.values.revenue}</td>) : <td><MissingData /></td>}
+              </tr>
+            </tbody>
+          </table>
+        </Panel>
+      </div>
+
+      {/* 7. Insider Trading & News */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Panel>
+          <PanelTitle>Company Insider Trading</PanelTitle>
+          <div className="overflow-x-auto">
+            {tradesData ? (
+              <table className="w-full text-left text-[12px] whitespace-nowrap">
+                <thead>
+                  <tr className="border-b border-[#2a2b36] text-muted-foreground">
+                    {tradesData.columns.map(c => <th key={c.key} className="pb-3 font-normal pr-4">{c.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tradesData.rows.slice(0, 8).map((row) => (
+                    <tr key={row.key} className="border-b border-[#2a2b36]/50 last:border-0">
+                      {tradesData.columns.map(c => (
+                        <td key={c.key} className={`py-3 pr-4 ${c.key === 'type' && row.values[c.key] === 'Buy' ? 'text-emerald-400' : c.key === 'type' ? 'text-muted-foreground' : ''}`}>
+                          {row.values[c.key]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="flex items-center justify-center p-8 bg-[#0f1015]/50 rounded-lg border border-[#2a2b36]/50">
+                <MissingData />
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        <Panel className="flex flex-col">
+          <PanelTitle>Latest News</PanelTitle>
+          {agg?.news && agg.news.length > 0 ? (
+            <div className="space-y-4">
+              {agg.news.slice(0, 7).map((newsItem: any, i: number) => (
+                <div key={i} className="flex gap-4 p-2 hover:bg-[#1a1b23] rounded-lg transition-colors cursor-pointer group border-b border-[#2a2b36]/40 last:border-0">
+                  <div className="w-16 h-12 bg-[#2a2b36] rounded shrink-0 overflow-hidden">
+                    {newsItem.image ? (
+                      <img src={newsItem.image} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" alt="News thumbnail" />
+                    ) : (
+                      <div className="w-full h-full bg-[#2a2b36] flex items-center justify-center text-muted-foreground text-xs">News</div>
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <a href={newsItem.url} target="_blank" rel="noreferrer" className="block">
+                      <h4 className="text-[13px] font-medium text-foreground/90 group-hover:text-sky-400 transition-colors leading-tight mb-1">{newsItem.headline}</h4>
+                      <div className="text-[11px] text-muted-foreground">{newsItem.source} | {new Date(newsItem.datetime * 1000).toLocaleDateString()}</div>
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col items-center justify-center bg-[#0f1015]/50 rounded-lg border border-[#2a2b36]/50 min-h-[200px]">
+              <MissingData />
+              <span className="text-muted-foreground text-sm mt-2">No news fetched</span>
+            </div>
+          )}
+        </Panel>
+      </div>
+
     </div>
   );
 }

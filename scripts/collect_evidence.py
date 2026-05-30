@@ -24,6 +24,7 @@ FUNDAMENTAL_COLUMNS = [
     "net_cash", "current_ratio", "roe", "roic", "revenue_per_employee",
     "fifty_day_ma", "two_hundred_day_ma", "fifty_two_week_high",
     "fifty_two_week_low", "current_price", "avg_dollar_volume", "momentum_history", "valuation_history",
+    "sbc_add_back", "ev_to_ebitda_normalized",
 ]
 
 
@@ -116,7 +117,35 @@ def collect_evidence(ticker: str) -> None:
         "avg_dollar_volume": None,
         "momentum_history": json.dumps(momentum_history),
         "valuation_history": json.dumps(valuation_history),
+        "sbc_add_back": None,
+        "ev_to_ebitda_normalized": None,
     }
+
+    # Extract SBC from cash flow statement for EV/EBITDA normalization
+    try:
+        cf_annual = stock.cashflow
+        if cf_annual is not None and not cf_annual.empty:
+            # Look for Stock Based Compensation row
+            sbc_row_names = [idx for idx in cf_annual.index if "stock" in str(idx).lower() and "comp" in str(idx).lower()]
+            if sbc_row_names:
+                sbc_val = _finite_or_none(cf_annual.loc[sbc_row_names[0]].iloc[0])
+                if sbc_val is not None:
+                    fundamentals["sbc_add_back"] = abs(sbc_val)
+    except Exception as exc:
+        print(f"Warning: failed to extract SBC from cash flow: {exc}")
+
+    # Compute normalized EV/EBITDA (EBITDA inclusive of SBC add-back)
+    ebitda_val = fundamentals.get("ebitda")
+    sbc_val = fundamentals.get("sbc_add_back")
+    ev_to_ebitda_raw = fundamentals.get("ev_to_ebitda")
+    enterprise_value = _finite_or_none(info.get("enterpriseValue"))
+    if ebitda_val is not None and sbc_val is not None and enterprise_value is not None:
+        normalized_ebitda = ebitda_val + sbc_val
+        if normalized_ebitda > 0:
+            fundamentals["ev_to_ebitda_normalized"] = enterprise_value / normalized_ebitda
+    elif ev_to_ebitda_raw is not None:
+        # Fallback: use raw if SBC not available
+        fundamentals["ev_to_ebitda_normalized"] = ev_to_ebitda_raw
     average_volume = _finite_or_none(info.get("averageVolume") or info.get("averageVolume10days"))
     current_price = fundamentals.get("current_price")
     if average_volume is not None and isinstance(current_price, float):
