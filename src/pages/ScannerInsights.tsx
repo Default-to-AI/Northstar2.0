@@ -7,43 +7,15 @@ import {Input} from '@/components/ui/input';
 import {Tabs, TabsList, TabsTrigger} from '@/components/ui/tabs';
 import {cn} from '@/lib/utils';
 
-type InsightItem = {
-  ticker: string;
-  name: string | null;
-  exchange: string | null;
-  sector: string | null;
-  price: number | null;
-  marketCap: number | null;
-};
+import type {
+  InsightItem,
+  InsightsResponse,
+  InsightTab,
+  SecuritySearchResult,
+  SecuritiesSearchResponse,
+} from '@/lib/insights/contracts';
 
-type InsightsResponse = {
-  tab: string;
-  generatedAt: string;
-  items: InsightItem[];
-  meta?: {
-    status: string;
-    message: string;
-  };
-  error?: string;
-};
-
-type SecuritySearchResult = {
-  ticker: string;
-  name: string | null;
-  exchange: string | null;
-  sector: string | null;
-};
-
-type SecuritiesSearchResponse = {
-  query: string;
-  results: SecuritySearchResult[];
-  error?: string;
-};
-
-type InsightsTab = {
-  id: string;
-  label: string;
-};
+type InsightsTab = InsightTab;
 
 const INSIGHTS_TABS: InsightsTab[] = [
   {id: 'sp500', label: 'S&P 500'},
