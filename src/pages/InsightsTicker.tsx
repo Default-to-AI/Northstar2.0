@@ -205,6 +205,7 @@ function CustomTooltip({ active, payload, label }: any) {
 
 // Chart Configurations mapping Title to data key and style
 const CHART_CONFIGS: Record<string, { dataKey: string; type: 'area' | 'bar'; color: string; fillOpacity: number }> = {
+  'Price': { dataKey: 'price', type: 'area', color: '#10b981', fillOpacity: 0.3 },
   'Revenue': { dataKey: 'revenue', type: 'bar', color: '#0ea5e9', fillOpacity: 1 },
   'EBITDA': { dataKey: 'ebitda', type: 'bar', color: '#8b5cf6', fillOpacity: 1 },
   'Net Income': { dataKey: 'netIncome', type: 'bar', color: '#10b981', fillOpacity: 1 },
@@ -212,7 +213,6 @@ const CHART_CONFIGS: Record<string, { dataKey: string; type: 'area' | 'bar'; col
   'EPS': { dataKey: 'eps', type: 'area', color: '#f59e0b', fillOpacity: 0.2 },
   'Shares Outstanding': { dataKey: 'shares', type: 'area', color: '#6366f1', fillOpacity: 0.2 },
   'Cash & Debt': { dataKey: 'cash', type: 'bar', color: '#10b981', fillOpacity: 1 },
-  'Dividends': { dataKey: 'dividends', type: 'bar', color: '#f43f5e', fillOpacity: 1 },
   'Return Of Capital': { dataKey: 'repurchases', type: 'bar', color: '#ec4899', fillOpacity: 1 },
 };
 
@@ -224,14 +224,14 @@ function MiniChart({ data, configKey }: { data: any[], configKey: string }) {
     <ResponsiveContainer width="100%" height="100%">
       {config.type === 'bar' ? (
         <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
-          <XAxis dataKey="period" stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
+          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
           <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
           <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
           <Bar dataKey={config.dataKey} fill={config.color} radius={[2, 2, 0, 0]} />
         </BarChart>
       ) : (
         <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
-          <XAxis dataKey="period" stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
+          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
           <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
           <Tooltip content={<CustomTooltip />} />
           <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
@@ -266,14 +266,14 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
         <ResponsiveContainer width="100%" height="100%">
           {config.type === 'bar' ? (
             <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-              <XAxis dataKey="period" stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
+              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
               <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
               <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
               <Bar dataKey={config.dataKey} fill={config.color} radius={[4, 4, 0, 0]} />
             </BarChart>
           ) : (
             <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-              <XAxis dataKey="period" stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
+              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
               <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
               <Tooltip content={<CustomTooltip />} />
               <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
@@ -333,6 +333,13 @@ export default function InsightsTicker() {
     enabled: normalizedTicker.length > 0,
   });
 
+  const agg = data?.aggregatedData || {};
+
+  const historicalData = useMemo(() => {
+    if (!agg?.pricing?.historical) return [];
+    return [...agg.pricing.historical].reverse();
+  }, [agg?.pricing?.historical]);
+
   if (isLoading) {
     return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>;
   }
@@ -346,15 +353,8 @@ export default function InsightsTicker() {
   
   const snapshotModule = data?.modules.find(m => m.title === 'SNAPSHOT') as InsightKpiModule | undefined;
   const getMetric = (label: string) => snapshotModule?.items.find(i => i.label === label)?.value || '—';
-
-  const agg = data?.aggregatedData || {};
   
   const currentChartData = timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
-
-  const historicalData = useMemo(() => {
-    if (!agg?.pricing?.historical) return [];
-    return [...agg.pricing.historical].reverse();
-  }, [agg?.pricing?.historical]);
 
   return (
     <div className="bg-[#0f1015] min-h-screen text-foreground p-6 space-y-6 overflow-y-auto">
@@ -391,13 +391,13 @@ export default function InsightsTicker() {
             <div className="flex-1 border border-[#2a2b36]/50 rounded-lg bg-[#0f1015]/50 overflow-hidden flex flex-col">
                {CHART_CONFIGS[selectedChart] ? (
                  <ExpandedChart 
-                   data={currentChartData.slice(
+                   data={selectedChart === 'Price' ? historicalData : currentChartData.slice(
                      expandedTimeframe === 'One Year' ? - (timeframe === 'Annually' ? 1 : 4) :
                      expandedTimeframe === 'Three Years' ? - (timeframe === 'Annually' ? 3 : 12) :
                      expandedTimeframe === 'Five Years' ? - (timeframe === 'Annually' ? 5 : 20) :
                      0
                    )} 
-                   fullData={currentChartData}
+                   fullData={selectedChart === 'Price' ? historicalData : currentChartData}
                    configKey={selectedChart} 
                    isAnnual={timeframe === 'Annually'} 
                  />
@@ -499,28 +499,7 @@ export default function InsightsTicker() {
         </div>
       </div>
 
-      {/* 1.5 Historical Price Chart */}
-      {historicalData.length > 0 && (
-        <Panel className="h-64 px-2 py-4">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={historicalData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <XAxis dataKey="date" stroke="#2a2b36" tick={{ fill: '#8b8d98', fontSize: 10 }} tickMargin={10} minTickGap={30} />
-              <YAxis domain={['auto', 'auto']} stroke="#2a2b36" tick={{ fill: '#8b8d98', fontSize: 10 }} />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#1a1b23', borderColor: '#2a2b36', borderRadius: '8px', fontSize: '12px' }}
-                itemStyle={{ color: '#fff' }}
-              />
-              <Area type="monotone" dataKey="price" stroke="#10b981" fillOpacity={1} fill="url(#colorPrice)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Panel>
-      )}
+
 
       {/* 2. Brief */}
       <Panel className="text-center flex flex-col items-center">
@@ -665,7 +644,7 @@ export default function InsightsTicker() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {['Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Dividends', 'Return Of Capital'].map((title) => (
+          {['Price', 'Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Return Of Capital'].map((title) => (
             <Panel 
               key={title} 
               className="p-4 h-48 flex flex-col cursor-pointer hover:border-primary/50 transition-colors group"
@@ -681,7 +660,7 @@ export default function InsightsTicker() {
               </div>
               <div className="flex-1 overflow-hidden mt-auto rounded relative">
                 {CHART_CONFIGS[title] ? (
-                  <MiniChart data={currentChartData} configKey={title} />
+                  <MiniChart data={title === 'Price' ? historicalData : currentChartData} configKey={title} />
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center bg-[#0f1015]/50 border border-[#2a2b36]/50">
                     <MissingData />
@@ -692,7 +671,7 @@ export default function InsightsTicker() {
           ))}
           
           {/* Missing/Unconfigured Charts */}
-          {['Price', 'Revenue By Segment', 'Valuation', 'Expenses'].map((title) => (
+          {['Valuation'].map((title) => (
             <Panel 
               key={title} 
               className="p-4 h-48 flex flex-col cursor-pointer hover:border-primary/50 transition-colors group"
