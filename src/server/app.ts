@@ -1766,6 +1766,18 @@ function registerApiRoutes(app: Express): void {
         
         const aggregatedData = await aggregateInsightsData(ticker);
 
+        let generatedAtStr = new Date().toISOString();
+        if (db) {
+          try {
+            const cacheRow = db.prepare(`SELECT MIN(timestamp) as ts FROM fmp_cache WHERE ticker = ?`).get(ticker) as {ts: string} | undefined;
+            if (cacheRow?.ts) {
+              generatedAtStr = new Date(cacheRow.ts.replace(' ', 'T') + 'Z').toISOString();
+            }
+          } catch (e) {
+            console.error('Failed to get cache timestamp:', e);
+          }
+        }
+
         // Persist normalization events to SQLite for dashboard queries
         if (aggregatedData?.valuation?.normalizationEvents?.length) {
           try {
@@ -1808,7 +1820,7 @@ function registerApiRoutes(app: Express): void {
           name: row.name,
           exchange: row.exchange,
           sector: row.sector,
-          generatedAt: new Date().toISOString(),
+          generatedAt: generatedAtStr,
           modules,
           aggregatedData
         });

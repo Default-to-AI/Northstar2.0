@@ -48,13 +48,9 @@ Financial Ratios TTM API: https://financialmodelingprep.com/stable/ratios-ttm?sy
 Financial Scores API: https://financialmodelingprep.com/stable/financial-scores?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
 - piotroskiScore
 
-- 
-- 
-
 Earnings Report API: https://financialmodelingprep.com/stable/earnings?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
 - epsActual ( against last year same quarter ) => 'Quarterly Earnings (YoY)%'
 - revenueActual ( against last year same quarter ) => Quarterly Revenue (YoY)%':
-- 
 
 Balance Sheet Statement API: https://financialmodelingprep.com/stable/balance-sheet-statement?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
 - cashAndCashEquivalents
@@ -66,13 +62,10 @@ Dividends Company API: https://financialmodelingprep.com/stable/dividends?symbol
 - paymentDate
 
 
+Stock Price Change API: https://financialmodelingprep.com/stable/stock-price-change?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
+- "ytd"
+- "1Y"
+- "3Y"
 
-
-Dividend
-Dividend Yield:
-Missing Data
-Payout Ratio:
-Missing Data
-Payout Date:
-Missing Data
-
+Sector P\E Snapshot API: https://financialmodelingprep.com/stable/sector-pe-snapshot?date=2024-02-01&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
+- All Sectors. Compare right sector with stocks PE to color that metric logically. Above / Way above average , Below / way below , on the average give or take.

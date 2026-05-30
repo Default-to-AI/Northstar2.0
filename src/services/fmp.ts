@@ -88,6 +88,17 @@ export async function getFmpFundamentals(ticker: string) {
   const ratiosTtm = await fetchFMPEndpoint(ticker, 'stable/ratios-ttm', 'limit=1');
   const financialScores = await fetchFMPEndpoint(ticker, 'stable/financial-scores', 'limit=1');
 
+  // Fetch Pricing and Historicals
+  const priceChange = await fetchFMPEndpoint(ticker, 'stable/stock-price-change', '');
+  const historicalPrices = await fetchFMPEndpoint(ticker, 'stable/historical-price-eod/light', '');
+
+  // Fetch Index Quotes
+  const [spyQuote, qqqQuote, diaQuote] = await Promise.all([
+    fetchFMPEndpoint('SPY', 'stable/quote-short', ''),
+    fetchFMPEndpoint('QQQ', 'stable/quote-short', ''),
+    fetchFMPEndpoint('DIA', 'stable/quote-short', '')
+  ]);
+
   return {
     annual: {
       income: Array.isArray(aIncome) ? aIncome : [],
@@ -105,6 +116,15 @@ export async function getFmpFundamentals(ticker: string) {
       keyMetrics: Array.isArray(keyMetricsTtm) ? keyMetricsTtm : [],
       ratios: Array.isArray(ratiosTtm) ? ratiosTtm : [],
       scores: Array.isArray(financialScores) ? financialScores : []
+    },
+    pricing: {
+      priceChange: Array.isArray(priceChange) && priceChange.length > 0 ? priceChange[0] : null,
+      historical: Array.isArray(historicalPrices) ? historicalPrices.slice(0, 100) : [] // Limit to 100 days
+    },
+    indexes: {
+      spy: Array.isArray(spyQuote) && spyQuote.length > 0 ? spyQuote[0] : null,
+      qqq: Array.isArray(qqqQuote) && qqqQuote.length > 0 ? qqqQuote[0] : null,
+      dia: Array.isArray(diaQuote) && diaQuote.length > 0 ? diaQuote[0] : null
     }
   };
 }

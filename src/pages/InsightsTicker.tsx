@@ -75,8 +75,8 @@ function formatYAxisTick(num: number) {
   return `$${Math.round(num)}`;
 }
 
-function formatRelativeTime(dateString: string) {
-  const diffInSeconds = Math.floor((Date.now() - new Date(dateString).getTime()) / 1000);
+function formatRelativeTime(dateString: string, now = Date.now()) {
+  const diffInSeconds = Math.max(0, Math.floor((now - new Date(dateString).getTime()) / 1000));
   if (diffInSeconds < 60) return `${diffInSeconds} second${diffInSeconds !== 1 ? 's' : ''} ago`;
   const diffInMinutes = Math.floor(diffInSeconds / 60);
   if (diffInMinutes < 60) return `${diffInMinutes} minute${diffInMinutes !== 1 ? 's' : ''} ago`;
@@ -84,6 +84,15 @@ function formatRelativeTime(dateString: string) {
   if (diffInHours < 24) return `${diffInHours} hour${diffInHours !== 1 ? 's' : ''} ago`;
   const diffInDays = Math.floor(diffInHours / 24);
   return `${diffInDays} day${diffInDays !== 1 ? 's' : ''} ago`;
+}
+
+function RelativeTimeDisplay({ timestamp }: { timestamp: string }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return <>{formatRelativeTime(timestamp, now)}</>;
 }
 
 // Format numbers for generic large values (e.g. Market Cap)
@@ -121,6 +130,26 @@ function getMetricColor(value: number | undefined | null, metricType: string) {
   if (metricType === 'evRevenue') {
     if (value < 3) return 'text-emerald-400';
     if (value <= 10) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'pe') {
+    if (value < 15) return 'text-emerald-400';
+    if (value <= 25) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'ps') {
+    if (value < 2) return 'text-emerald-400';
+    if (value <= 5) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'pb') {
+    if (value < 1.5) return 'text-emerald-400';
+    if (value <= 3) return 'text-amber-400';
+    return 'text-rose-400';
+  }
+  if (metricType === 'evEbitda') {
+    if (value < 10) return 'text-emerald-400';
+    if (value <= 15) return 'text-amber-400';
     return 'text-rose-400';
   }
   if (metricType === 'yield') {
@@ -322,6 +351,11 @@ export default function InsightsTicker() {
   
   const currentChartData = timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
 
+  const historicalData = useMemo(() => {
+    if (!agg?.pricing?.historical) return [];
+    return [...agg.pricing.historical].reverse();
+  }, [agg?.pricing?.historical]);
+
   return (
     <div className="bg-[#0f1015] min-h-screen text-foreground p-6 space-y-6 overflow-y-auto">
       
@@ -381,9 +415,9 @@ export default function InsightsTicker() {
       {/* 1. Header Area */}
       <div className="relative">
         <div className="absolute top-0 right-0 flex gap-4 text-[11px] font-mono text-muted-foreground bg-[#1a1b23] px-3 py-1.5 rounded-bl-lg border-b border-l border-[#2a2b36]">
-          <span>Dow Jones <MissingData /></span>
-          <span>S&P 500 <MissingData /></span>
-          <span>Nasdaq <MissingData /></span>
+          <span>Dow Jones {agg?.indexes?.dia?.price ? <span className={agg.indexes.dia.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.dia.price.toFixed(2)}</span> : <MissingData />}</span>
+          <span>S&P 500 {agg?.indexes?.spy?.price ? <span className={agg.indexes.spy.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.spy.price.toFixed(2)}</span> : <MissingData />}</span>
+          <span>Nasdaq {agg?.indexes?.qqq?.price ? <span className={agg.indexes.qqq.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.qqq.price.toFixed(2)}</span> : <MissingData />}</span>
         </div>
         
         <div className="flex flex-col items-center justify-center pt-8 pb-4">
@@ -402,7 +436,7 @@ export default function InsightsTicker() {
             <div className="text-[11px] text-muted-foreground font-mono bg-emerald-500/10 text-emerald-400/90 px-3 py-1.5 rounded-full border border-emerald-500/20 flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               {data?.generatedAt ? (
-                <>Last Data Refresh: {formatRelativeTime(data.generatedAt)}</>
+                <>Last Data Refresh: <RelativeTimeDisplay timestamp={data.generatedAt} /></>
               ) : (
                 <>Last Data Refresh: <MissingData /></>
               )}
@@ -454,9 +488,39 @@ export default function InsightsTicker() {
                 </>
               ) : <MissingData />}
             </div>
+            {agg?.pricing?.priceChange && (
+              <div className="flex justify-center gap-4 mt-3 text-[11px] font-mono">
+                <span className="text-muted-foreground">YTD: {agg.pricing.priceChange.ytd != null ? <span className={agg.pricing.priceChange.ytd >= 0 ? "text-emerald-400" : "text-rose-400"}>{agg.pricing.priceChange.ytd > 0 ? '+' : ''}{agg.pricing.priceChange.ytd.toFixed(2)}%</span> : <MissingData />}</span>
+                <span className="text-muted-foreground">1Y: {agg.pricing.priceChange['1Y'] != null ? <span className={agg.pricing.priceChange['1Y'] >= 0 ? "text-emerald-400" : "text-rose-400"}>{agg.pricing.priceChange['1Y'] > 0 ? '+' : ''}{agg.pricing.priceChange['1Y'].toFixed(2)}%</span> : <MissingData />}</span>
+                <span className="text-muted-foreground">3Y: {agg.pricing.priceChange['3Y'] != null ? <span className={agg.pricing.priceChange['3Y'] >= 0 ? "text-emerald-400" : "text-rose-400"}>{agg.pricing.priceChange['3Y'] > 0 ? '+' : ''}{agg.pricing.priceChange['3Y'].toFixed(2)}%</span> : <MissingData />}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* 1.5 Historical Price Chart */}
+      {historicalData.length > 0 && (
+        <Panel className="h-64 px-2 py-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={historicalData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" stroke="#2a2b36" tick={{ fill: '#8b8d98', fontSize: 10 }} tickMargin={10} minTickGap={30} />
+              <YAxis domain={['auto', 'auto']} stroke="#2a2b36" tick={{ fill: '#8b8d98', fontSize: 10 }} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1b23', borderColor: '#2a2b36', borderRadius: '8px', fontSize: '12px' }}
+                itemStyle={{ color: '#fff' }}
+              />
+              <Area type="monotone" dataKey="price" stroke="#10b981" fillOpacity={1} fill="url(#colorPrice)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
 
       {/* 2. Brief */}
       <Panel className="text-center flex flex-col items-center">
@@ -468,9 +532,7 @@ export default function InsightsTicker() {
           ) : (
             <MissingData />
           )}
-          <div className="mt-4 pt-4 border-t border-[#2a2b36]/50 w-full">
-            <span className="font-semibold text-white">Actionability State:</span> <strong>{agg?.actionabilityState || 'fresh_actionable'}</strong>
-          </div>
+
         </div>
       </Panel>
 
@@ -488,7 +550,7 @@ export default function InsightsTicker() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">P/E (TTM):</span>
-              <span className="flex items-center gap-1">
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.ttm, 'pe'))}>
                 {agg?.valuation?.pe?.ttm ? agg.valuation.pe.ttm.toFixed(2) : <MissingData />}
                 {agg?.valuation?.normalizationEvents?.some((e: any) => e.metric === 'PE_TTM') && (
                   <span title={`Cross-source deviation >2% — using median. ${agg.valuation.normalizationEvents.filter((e: any) => e.metric === 'PE_TTM').map((e: any) => `${e.outlierSource}: ${e.deviation.toFixed(2)}%`).join(', ')}`} className="text-amber-400 cursor-help text-[10px]">⚠</span>
@@ -497,33 +559,32 @@ export default function InsightsTicker() {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">P/E (NTM):</span>
-              <span>{agg?.valuation?.pe?.ntm ? agg.valuation.pe.ntm.toFixed(2) : <MissingData />}</span>
+              <span className={getMetricColor(agg?.valuation?.pe?.ntm, 'pe')}>{agg?.valuation?.pe?.ntm ? agg.valuation.pe.ntm.toFixed(2) : <MissingData />}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">P/E (2027E):</span>
-              <span className="flex items-center gap-1">
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.fy2027, 'pe'))}>
                 {agg?.valuation?.pe?.fy2027 ? agg.valuation.pe.fy2027.toFixed(2) : <MissingData />}
                 {agg?.valuation?.pe?.fy2027 && <span className="text-[9px] text-muted-foreground ml-0.5" title="Extrapolated from long-term growth rate applied to NTM EPS">est.</span>}
               </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">EV/EBITDA (TTM):</span>
-              <span className="flex items-center gap-1">
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.evEbitda, 'evEbitda'))}>
                 {agg?.valuation?.evEbitda ? agg.valuation.evEbitda.toFixed(2) : <MissingData />}
                 {agg?.valuation?.normalizationEvents?.some((e: any) => e.metric === 'EV_EBITDA') && (
                   <span title={`Cross-source deviation >2% — using median. ${agg.valuation.normalizationEvents.filter((e: any) => e.metric === 'EV_EBITDA').map((e: any) => `${e.outlierSource}: ${e.deviation.toFixed(2)}%`).join(', ')}`} className="text-amber-400 cursor-help text-[10px]">⚠</span>
                 )}
               </span>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground text-[11px]">EV/EBITDA (SBC Adj.):</span>
-              <span className="flex items-center gap-1">
+            <div className="flex justify-between items-center"><span className="text-muted-foreground text-[11px]">EV/EBITDA (SBC Adj.):</span>
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.evEbitdaNormalized, 'evEbitda'))}>
                 {agg?.valuation?.evEbitdaNormalized ? agg.valuation.evEbitdaNormalized.toFixed(2) : <MissingData />}
                 {agg?.valuation?.sbcAddBack && <span className="text-[9px] text-emerald-400/70 ml-0.5" title={`SBC add-back: $${formatLargeNumber(agg.valuation.sbcAddBack)}`}>+SBC</span>}
               </span>
             </div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price To Sales (TTM):</span> <span>{agg?.valuation?.ps ? agg.valuation.ps.toFixed(2) : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price to Book (MRQ):</span> <span>{agg?.valuation?.pb ? agg.valuation.pb.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price To Sales (TTM):</span> <span className={getMetricColor(agg?.valuation?.ps, 'ps')}>{agg?.valuation?.ps ? agg.valuation.ps.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Price to Book (MRQ):</span> <span className={getMetricColor(agg?.valuation?.pb, 'pb')}>{agg?.valuation?.pb ? agg.valuation.pb.toFixed(2) : <MissingData />}</span></div>
             {agg?.valuation?.normalizationEvents && agg.valuation.normalizationEvents.length > 0 && (
               <div className="mt-3 pt-2 border-t border-amber-500/20">
                 <div className="flex items-center gap-1 text-[10px] text-amber-400 font-semibold mb-1">
@@ -545,37 +606,37 @@ export default function InsightsTicker() {
           </div>
           <div className="space-y-2 border-r border-[#2a2b36] pr-6">
             <h4 className="font-semibold text-white mb-4">Advanced Ratios</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">PEG Ratio (TTM):</span> <span className={getMetricColor(agg?.ratios?.pegRatio, 'peg')}>{agg?.ratios?.pegRatio !== undefined ? agg.ratios.pegRatio.toFixed(2) : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Equity (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnEquity, 'roe')}>{agg?.ratios?.returnOnEquity !== undefined ? `${agg.ratios.returnOnEquity.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Assets (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnAssets, 'roa')}>{agg?.ratios?.returnOnAssets !== undefined ? `${agg.ratios.returnOnAssets.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">EV to Revenue (TTM):</span> <span className={getMetricColor(agg?.ratios?.evToRevenue, 'evRevenue')}>{agg?.ratios?.evToRevenue !== undefined ? agg.ratios.evToRevenue.toFixed(2) : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore !== undefined && agg?.ratios?.piotroskiScore !== null ? `${agg.ratios.piotroskiScore}/9` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">PEG Ratio (TTM):</span> <span className={getMetricColor(agg?.ratios?.pegRatio, 'peg')}>{agg?.ratios?.pegRatio != null ? agg.ratios.pegRatio.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Equity (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnEquity, 'roe')}>{agg?.ratios?.returnOnEquity != null ? `${agg.ratios.returnOnEquity.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Return on Assets (TTM):</span> <span className={getMetricColor(agg?.ratios?.returnOnAssets, 'roa')}>{agg?.ratios?.returnOnAssets != null ? `${agg.ratios.returnOnAssets.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">EV to Revenue (TTM):</span> <span className={getMetricColor(agg?.ratios?.evToRevenue, 'evRevenue')}>{agg?.ratios?.evToRevenue != null ? agg.ratios.evToRevenue.toFixed(2) : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore != null && agg?.ratios?.piotroskiScore !== null ? `${agg.ratios.piotroskiScore}/9` : <MissingData />}</span></div>
           </div>
           <div className="space-y-2 border-r border-[#2a2b36] pr-6">
             <h4 className="font-semibold text-white mb-4">Cash Flow</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Yield (TTM):</span> <span className={getMetricColor(agg?.cashFlow?.fcfYield, 'yield')}>{agg?.cashFlow?.fcfYield !== undefined ? `${(agg.cashFlow.fcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Per Share / Price:</span> <span>{agg?.ratios?.freeCashFlowPerShare !== undefined && agg?.quote?.price ? `${agg.ratios.freeCashFlowPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Adj. FCF Yield:</span> <span className={getMetricColor(agg?.cashFlow?.adjFcfYield, 'yield')}>{agg?.cashFlow?.adjFcfYield !== undefined ? `${(agg.cashFlow.adjFcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground text-[10px]">Adj. FCF Per Share / Price:</span> <span>{agg?.cashFlow?.adjFcfPerShare !== undefined && agg?.quote?.price ? `${agg.cashFlow.adjFcfPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Impact:</span> <span className={getMetricColor(agg?.cashFlow?.sbcImpact, 'sbcImpact')}>{agg?.cashFlow?.sbcImpact !== undefined ? `${agg.cashFlow.sbcImpact.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Yield (TTM):</span> <span className={getMetricColor(agg?.cashFlow?.fcfYield, 'yield')}>{agg?.cashFlow?.fcfYield != null ? `${(agg.cashFlow.fcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">FCF Per Share / Price:</span> <span>{agg?.ratios?.freeCashFlowPerShare != null && agg?.quote?.price ? `${agg.ratios.freeCashFlowPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Adj. FCF Yield:</span> <span className={getMetricColor(agg?.cashFlow?.adjFcfYield, 'yield')}>{agg?.cashFlow?.adjFcfYield != null ? `${(agg.cashFlow.adjFcfYield * 100).toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground text-[10px]">Adj. FCF Per Share / Price:</span> <span>{agg?.cashFlow?.adjFcfPerShare != null && agg?.quote?.price ? `${agg.cashFlow.adjFcfPerShare.toFixed(2)} / ${agg.quote.price.toFixed(2)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center mt-2"><span className="text-muted-foreground">SBC Impact:</span> <span className={getMetricColor(agg?.cashFlow?.sbcImpact, 'sbcImpact')}>{agg?.cashFlow?.sbcImpact != null ? `${agg.cashFlow.sbcImpact.toFixed(2)}%` : <MissingData />}</span></div>
           </div>
           <div className="space-y-2 border-r border-[#2a2b36] pr-6">
             <h4 className="font-semibold text-white mb-4">Margins & Growth</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Profit Margins (TTM):</span> <span className={getMetricColor(agg?.margins?.profitMargin, 'margin')}>{agg?.margins?.profitMargin !== undefined ? `${agg.margins.profitMargin.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Operating Margin (TTM):</span> <span className={getMetricColor(agg?.margins?.operatingMargin, 'margin')}>{agg?.margins?.operatingMargin !== undefined ? `${agg.margins.operatingMargin.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Earnings YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qEarningsYoY, 'growth')}>{agg?.margins?.qEarningsYoY !== undefined ? `${agg.margins.qEarningsYoY.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Revenue YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qRevenueYoY, 'growth')}>{agg?.margins?.qRevenueYoY !== undefined ? `${agg.margins.qRevenueYoY.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Profit Margins (TTM):</span> <span className={getMetricColor(agg?.margins?.profitMargin, 'margin')}>{agg?.margins?.profitMargin != null ? `${agg.margins.profitMargin.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Operating Margin (TTM):</span> <span className={getMetricColor(agg?.margins?.operatingMargin, 'margin')}>{agg?.margins?.operatingMargin != null ? `${agg.margins.operatingMargin.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Earnings YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qEarningsYoY, 'growth')}>{agg?.margins?.qEarningsYoY != null ? `${agg.margins.qEarningsYoY.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Revenue YoY (MRQ):</span> <span className={getMetricColor(agg?.margins?.qRevenueYoY, 'growth')}>{agg?.margins?.qRevenueYoY != null ? `${agg.margins.qRevenueYoY.toFixed(2)}%` : <MissingData />}</span></div>
           </div>
           <div className="space-y-2 border-r border-[#2a2b36] pr-6">
             <h4 className="font-semibold text-white mb-4">Balance</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Cash (MRQ):</span> <span>{agg?.balance?.cash !== undefined ? `$${formatLargeNumber(agg.balance.cash)}` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Debt (MRQ):</span> <span>{agg?.balance?.debt !== undefined ? `$${formatLargeNumber(agg.balance.debt)}` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Net Debt (MRQ):</span> <span>{agg?.balance?.netDebt !== undefined ? `$${formatLargeNumber(agg.balance.netDebt)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Cash (MRQ):</span> <span>{agg?.balance?.cash != null ? `$${formatLargeNumber(agg.balance.cash)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Debt (MRQ):</span> <span>{agg?.balance?.debt != null ? `$${formatLargeNumber(agg.balance.debt)}` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Net Debt (MRQ):</span> <span>{agg?.balance?.netDebt != null ? `$${formatLargeNumber(agg.balance.netDebt)}` : <MissingData />}</span></div>
           </div>
           <div className="space-y-2">
             <h4 className="font-semibold text-white mb-4">Dividend</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Dividend Yield:</span> <span className={getMetricColor(agg?.dividend?.divYield, 'divYield')}>{agg?.dividend?.divYield !== undefined ? `${agg.dividend.divYield.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Ratio:</span> <span className={getMetricColor(agg?.dividend?.payoutRatio, 'payoutRatio')}>{agg?.dividend?.payoutRatio !== undefined ? `${agg.dividend.payoutRatio.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Dividend Yield:</span> <span className={getMetricColor(agg?.dividend?.divYield, 'divYield')}>{agg?.dividend?.divYield != null ? `${agg.dividend.divYield.toFixed(2)}%` : <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Ratio:</span> <span className={getMetricColor(agg?.dividend?.payoutRatio, 'payoutRatio')}>{agg?.dividend?.payoutRatio != null ? `${agg.dividend.payoutRatio.toFixed(2)}%` : <MissingData />}</span></div>
             <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Date:</span> <span>{agg?.dividend?.exDivDate || <MissingData />}</span></div>
           </div>
         </div>
@@ -687,7 +748,7 @@ export default function InsightsTicker() {
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Industry</span> <span>{agg?.profile?.industry || <MissingData />}</span></div>
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Full Time Employees</span> <span>{agg?.profile?.employees ? agg.profile.employees.toLocaleString() : <MissingData />}</span></div>
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Beta</span> <span>{agg?.profile?.beta ? agg.profile.beta.toFixed(3) : <MissingData />}</span></div>
-            <div className="flex justify-between py-1 items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore !== undefined && agg?.ratios?.piotroskiScore !== null ? <span className="font-bold">{agg.ratios.piotroskiScore}/9</span> : <MissingData />}</span></div>
+            <div className="flex justify-between py-1 items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore != null && agg?.ratios?.piotroskiScore !== null ? <span className="font-bold">{agg.ratios.piotroskiScore}/9</span> : <MissingData />}</span></div>
           </div>
         </Panel>
 

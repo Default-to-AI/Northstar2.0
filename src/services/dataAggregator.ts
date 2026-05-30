@@ -218,7 +218,7 @@ export async function aggregateInsightsData(ticker: string) {
     fmpData.annual.ratios = fmpRatiosRaw;
   }
 
-  const { annual: aData, quarterly: qData, ttm: ttmData = {} } = fmpData;
+  const { annual: aData, quarterly: qData, ttm: ttmData = {}, pricing = {}, indexes = {} } = fmpData;
   
   const qIncome = qData.income || [];
   const qBalance = qData.balance || [];
@@ -350,31 +350,10 @@ export async function aggregateInsightsData(ticker: string) {
   const evEbitdaValidated = evValidation.validatedValue;
   normalizationEvents.push(...evValidation.events);
 
-  // Add SBC Adjusted flag
+  // Add SBC Adjusted flag for payload export
   const sbcAdjusted = sbcAddBack !== null && sbcAddBack > 0;
-  if (provider === 'FMP' && !sbcAdjusted) {
-    normalizationEvents.push({
-      ticker,
-      metric: 'SBC_ADJUSTMENT',
-      outlierSource: 'FMP Fallback',
-      deviation: 0,
-      median: 0,
-      sources: [{name: 'FMP', value: 0}],
-      timestamp: new Date().toISOString(),
-      note: 'EV/EBITDA is Unadjusted because SBC data is unavailable in FMP free tier. Waiting for AV limits to reset.'
-    });
-  } else if (sbcAdjusted) {
-    normalizationEvents.push({
-      ticker,
-      metric: 'SBC_ADJUSTMENT',
-      outlierSource: provider,
-      deviation: 0,
-      median: 0,
-      sources: [{name: provider, value: 0}],
-      timestamp: new Date().toISOString(),
-      note: 'EV/EBITDA is properly SBC Adjusted!'
-    });
-  }
+  
+  // Remove SBC_ADJUSTMENT flag logic as requested
 
   // Log normalization events
   if (normalizationEvents.length > 0) {
@@ -583,6 +562,8 @@ export async function aggregateInsightsData(ticker: string) {
     dividend: { divYield, payoutRatio, exDivDate },
     ratios,
     news: finnhubNews,
+    pricing,
+    indexes,
     charts: {
       quarterly: chartDataQuarterly,
       annual: chartDataAnnual
