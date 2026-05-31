@@ -20,3 +20,4 @@ opencode.jsonc
 .vercel
 *.db
 !data/*.db
+data/northstar.db*
