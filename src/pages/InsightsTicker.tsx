@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown, Info } from 'lucide-react';
+import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown, Info, ArrowUp, ArrowDown } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -71,13 +71,19 @@ const TOP_MCAP_RANKS: Record<string, number> = {
 };
 
 // Format numbers for Y-Axis (Integers only, with $)
-function formatYAxisTick(num: number) {
-  if (num == null) return '';
-  if (num === 0) return '$0';
-  if (Math.abs(num) >= 1e12) return `$${Math.round(num / 1e12)}T`;
-  if (Math.abs(num) >= 1e9) return `$${Math.round(num / 1e9)}B`;
-  if (Math.abs(num) >= 1e6) return `$${Math.round(num / 1e6)}M`;
-  return `$${Math.round(num)}`;
+function formatYAxisTick(value: number) {
+  if (value === 0) return '0';
+  return '$' + formatLargeNumber(value);
+}
+
+function formatXAxisTick(tickItem: string, configKey: string) {
+  if (configKey === 'Price' && tickItem && typeof tickItem === 'string') {
+    const parts = tickItem.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+  }
+  return tickItem;
 }
 
 function formatRelativeTime(dateString: string, now = Date.now()) {
@@ -248,15 +254,15 @@ function MiniChart({ data, configKey }: { data: any[], configKey: string }) {
     <ResponsiveContainer width="100%" height="100%">
       {config.type === 'bar' ? (
         <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
-          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
-          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
+          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" tickFormatter={(val) => formatXAxisTick(val, configKey)} />
+          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
           <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
           <Bar dataKey={config.dataKey} fill={config.color} radius={[2, 2, 0, 0]} />
         </BarChart>
       ) : (
         <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
-          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" />
-          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} />
+          <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" tickFormatter={(val) => formatXAxisTick(val, configKey)} />
+          <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
           <Tooltip content={<CustomTooltip />} />
           <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
         </AreaChart>
@@ -272,9 +278,10 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
   const currentVal = fullData[fullData.length - 1]?.[config.dataKey];
   
   const calculateGrowth = (years: number) => {
-    const offset = isAnnual ? years : years * 4;
-    if (fullData.length <= offset) return null;
-    const pastVal = fullData[fullData.length - 1 - offset]?.[config.dataKey];
+    const offset = configKey === 'Price' ? years * 252 : (isAnnual ? years : years * 4);
+    if (fullData.length < offset * 0.9) return null;
+    const startIndex = Math.max(0, fullData.length - 1 - offset);
+    const pastVal = fullData[startIndex]?.[config.dataKey];
     if (!pastVal || pastVal <= 0 || !currentVal || currentVal <= 0) return null;
     const cagr = (Math.pow(currentVal / pastVal, 1 / years) - 1) * 100;
     return cagr.toFixed(2);
@@ -289,15 +296,15 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
         <ResponsiveContainer width="100%" height="100%">
           {config.type === 'bar' ? (
             <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
-              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
+              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} tickFormatter={(val) => formatXAxisTick(val, configKey)} />
+              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
               <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
               <Bar dataKey={config.dataKey} fill={config.color} radius={[4, 4, 0, 0]} />
             </BarChart>
           ) : (
             <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} />
-              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} />
+              <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} tickFormatter={(val) => formatXAxisTick(val, configKey)} />
+              <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
               <Tooltip content={<CustomTooltip />} />
               <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
             </AreaChart>
@@ -306,9 +313,9 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
       </div>
       {(cagr1 || cagr3 || cagr5) && (
         <div className="flex gap-3 justify-center pb-4 pt-2">
-          {cagr1 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">1Y: {cagr1}%</span>}
-          {cagr3 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">3Y: {cagr3}%</span>}
-          {cagr5 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">5Y: {cagr5}%</span>}
+          {cagr1 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">1Y CAGR: {cagr1}%</span>}
+          {cagr3 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">3Y CAGR: {cagr3}%</span>}
+          {cagr5 && <span className="bg-emerald-500/20 text-emerald-400 px-3 py-1 rounded-md text-xs font-semibold">5Y CAGR: {cagr5}%</span>}
         </div>
       )}
     </div>
@@ -324,7 +331,7 @@ export default function InsightsTicker() {
   const queryClient = useQueryClient();
   const [timeframe, setTimeframe] = useState<'Quarterly' | 'TTM' | 'Annually'>('Quarterly');
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
-  const [expandedTimeframe, setExpandedTimeframe] = useState<'One Year' | 'Two Years' | 'Three Years' | 'Five Years' | 'Ten Years' | 'All'>('Five Years');
+  const [expandedTimeframe, setExpandedTimeframe] = useState<'1 Week' | '1 Month' | '3 Months' | '6 Months' | 'YTD' | '1 Year' | '3 Years' | '5 Years' | '10 Years' | 'All'>('5 Years');
   const [isPatching, setIsPatching] = useState(false);
 
   // --- Data Fetching ---
@@ -396,6 +403,51 @@ export default function InsightsTicker() {
     return timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
   }, [timeframe, agg?.charts]);
 
+  const chartDataToRender = useMemo(() => {
+    if (!selectedChart) return [];
+    const isPrice = selectedChart === 'Price';
+    const targetData = isPrice ? historicalData : currentChartData;
+    let sliceAmount = 0;
+    if (expandedTimeframe === 'YTD') {
+      if (isPrice) {
+        const currentYear = new Date().getFullYear().toString();
+        const ytdIndex = targetData.findIndex((d: any) => d.date && d.date.startsWith(currentYear));
+        sliceAmount = ytdIndex !== -1 ? targetData.length - ytdIndex : 252;
+      } else {
+        sliceAmount = timeframe === 'Annually' ? 1 : 4;
+      }
+    } else if (expandedTimeframe === '1 Week') {
+      sliceAmount = isPrice ? 5 : 1;
+    } else if (expandedTimeframe === '1 Month') {
+      sliceAmount = isPrice ? 21 : 1;
+    } else if (expandedTimeframe === '3 Months') {
+      sliceAmount = isPrice ? 63 : (timeframe === 'Annually' ? 1 : 1);
+    } else if (expandedTimeframe === '6 Months') {
+      sliceAmount = isPrice ? 126 : (timeframe === 'Annually' ? 1 : 2);
+    } else if (expandedTimeframe === '1 Year') {
+      sliceAmount = isPrice ? 252 : (timeframe === 'Annually' ? 1 : 4);
+    } else if (expandedTimeframe === '3 Years') {
+      sliceAmount = isPrice ? 756 : (timeframe === 'Annually' ? 3 : 12);
+    } else if (expandedTimeframe === '5 Years') {
+      sliceAmount = isPrice ? 1260 : (timeframe === 'Annually' ? 5 : 20);
+    } else if (expandedTimeframe === '10 Years') {
+      sliceAmount = isPrice ? 2520 : (timeframe === 'Annually' ? 10 : 40);
+    }
+    return sliceAmount > 0 ? targetData.slice(-sliceAmount) : targetData;
+  }, [selectedChart, historicalData, currentChartData, expandedTimeframe, timeframe]);
+
+  const chartPercentChange = useMemo(() => {
+    if (!selectedChart || chartDataToRender.length < 2) return null;
+    const config = CHART_CONFIGS[selectedChart];
+    if (!config) return null;
+    const firstPoint = chartDataToRender[0]?.[config.dataKey];
+    const lastPoint = chartDataToRender[chartDataToRender.length - 1]?.[config.dataKey];
+    if (firstPoint && lastPoint && firstPoint !== 0) {
+      return ((lastPoint - firstPoint) / firstPoint) * 100;
+    }
+    return null;
+  }, [selectedChart, chartDataToRender]);
+
   if (isLoading) {
     return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>;
   }
@@ -417,27 +469,44 @@ export default function InsightsTicker() {
       {selectedChart && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-8" onClick={() => setSelectedChart(null)}>
           <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-xl w-full max-w-6xl h-[80vh] flex flex-col p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-8">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-lg">
+            <div className="flex justify-between items-start mb-8 relative">
+              <div className="flex items-center gap-4">
+                <img 
+                  src={`https://logo.clearbit.com/${agg?.profile?.website ? new URL(agg.profile.website).hostname.replace(/^www\./, '') : normalizedTicker + '.com'}`}
+                  alt={normalizedTicker}
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                  }}
+                  className="w-12 h-12 object-contain bg-white rounded"
+                />
+                <div className="w-12 h-12 bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-2xl hidden">
                   {normalizedTicker.charAt(0)}
                 </div>
-                <h2 className="text-lg font-bold text-white">{selectedChart} - {normalizedTicker}</h2>
-              </div>
-              <div className="flex gap-2 items-center">
-                <div className="relative">
-                  <select 
-                    className="appearance-none bg-[#0f1015] border border-[#2a2b36] text-white text-sm rounded px-3 py-1.5 pr-8 focus:outline-none cursor-pointer"
-                    value={expandedTimeframe}
-                    onChange={e => setExpandedTimeframe(e.target.value as any)}
-                  >
-                    <option value="One Year">One Year</option>
-                    <option value="Three Years">Three Years</option>
-                    <option value="Five Years">Five Years</option>
-                    <option value="All">All</option>
-                  </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <div className="flex flex-col">
+                  <h2 className="text-xl font-bold text-white leading-tight">{selectedChart} - {normalizedTicker}</h2>
+                  {chartPercentChange !== null && (
+                    <div className={`flex items-center gap-1 font-semibold text-sm ${chartPercentChange >= 0 ? 'text-emerald-400 bg-emerald-400/10' : 'text-rose-400 bg-rose-400/10'} px-2 py-0.5 rounded-sm w-fit mt-1`}>
+                      {chartPercentChange >= 0 ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
+                      {chartPercentChange >= 0 ? '+' : ''}{chartPercentChange.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                    </div>
+                  )}
                 </div>
+              </div>
+              
+              <div className="absolute left-1/2 -translate-x-1/2 top-0 flex items-center border border-[#2a2b36] rounded overflow-hidden">
+                {['1 Week', '1 Month', '3 Months', '6 Months', 'YTD', '1 Year', '5 Years', '10 Years', 'All'].map(tf => (
+                  <button 
+                    key={tf}
+                    onClick={() => setExpandedTimeframe(tf as any)}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-[#2a2b36] last:border-r-0 ${expandedTimeframe === tf ? 'bg-[#0ea5e9]/20 text-[#0ea5e9]' : 'bg-[#0f1015] text-muted-foreground hover:bg-[#1a1b23] hover:text-white'}`}
+                  >
+                    {tf}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2 items-center">
                 <button className="bg-[#0f1015] border border-[#2a2b36] p-1.5 rounded hover:bg-[#2a2b36] transition-colors"><Download className="w-4 h-4" /></button>
                 <button className="bg-[#0f1015] border border-[#2a2b36] p-1.5 rounded hover:bg-[#2a2b36] transition-colors" onClick={() => setSelectedChart(null)}><X className="w-4 h-4" /></button>
               </div>
@@ -445,12 +514,7 @@ export default function InsightsTicker() {
             <div className="flex-1 border border-[#2a2b36]/50 rounded-lg bg-[#0f1015]/50 overflow-hidden flex flex-col">
                {CHART_CONFIGS[selectedChart] ? (
                  <ExpandedChart 
-                   data={selectedChart === 'Price' ? historicalData : currentChartData.slice(
-                     expandedTimeframe === 'One Year' ? - (timeframe === 'Annually' ? 1 : 4) :
-                     expandedTimeframe === 'Three Years' ? - (timeframe === 'Annually' ? 3 : 12) :
-                     expandedTimeframe === 'Five Years' ? - (timeframe === 'Annually' ? 5 : 20) :
-                     0
-                   )} 
+                   data={chartDataToRender} 
                    fullData={selectedChart === 'Price' ? historicalData : currentChartData}
                    configKey={selectedChart} 
                    isAnnual={timeframe === 'Annually'} 
@@ -747,17 +811,54 @@ export default function InsightsTicker() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          {['Price', 'Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Return Of Capital'].map((title) => (
+          {['Price', 'Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Return Of Capital'].map((title) => {
+            const dataArr = title === 'Price' ? historicalData : currentChartData;
+            const config = CHART_CONFIGS[title];
+            let pctChange: number | null = null;
+            if (dataArr && dataArr.length >= 2 && config) {
+              const first = dataArr[0]?.[config.dataKey];
+              const last = dataArr[dataArr.length - 1]?.[config.dataKey];
+              if (first && last && first !== 0) {
+                pctChange = ((last - first) / first) * 100;
+              }
+            }
+            return (
             <Panel 
               key={title} 
               className="p-4 h-48 flex flex-col cursor-pointer hover:border-primary/50 transition-colors group"
               onClick={() => setSelectedChart(title)}
             >
               <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-[12px] font-semibold text-foreground">{title}</span>
+                <div className="flex items-center gap-2.5">
+                  {title === 'Price' && (
+                    <div className="w-8 h-8 shrink-0 relative">
+                      <img 
+                        src={`https://logo.clearbit.com/${agg?.profile?.website ? new URL(agg.profile.website).hostname.replace(/^www\./, '') : normalizedTicker + '.com'}`}
+                        alt={normalizedTicker}
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                        }}
+                        className="w-full h-full object-contain bg-white rounded"
+                      />
+                      <div className="w-full h-full bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-sm hidden">
+                        {normalizedTicker.charAt(0)}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex flex-col">
+                    <span className="text-[13px] font-semibold text-foreground leading-tight">
+                      {title === 'Price' ? `Price - ${normalizedTicker}` : title}
+                    </span>
+                    {pctChange !== null && (
+                      <div className={`flex items-center gap-0.5 font-semibold text-[10px] ${pctChange >= 0 ? 'text-emerald-400 bg-emerald-400/10' : 'text-rose-400 bg-rose-400/10'} px-1.5 py-0.5 rounded-sm w-fit mt-0.5`}>
+                        {pctChange >= 0 ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                        {pctChange >= 0 ? '+' : ''}{pctChange.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <button className="text-muted-foreground group-hover:text-white transition-colors">
+                <button className="text-muted-foreground group-hover:text-white transition-colors shrink-0">
                   <ExternalLink className="w-3 h-3" />
                 </button>
               </div>
@@ -771,7 +872,7 @@ export default function InsightsTicker() {
                 )}
               </div>
             </Panel>
-          ))}
+          );})}
           
           {/* Missing/Unconfigured Charts */}
           {['Valuation'].map((title) => (

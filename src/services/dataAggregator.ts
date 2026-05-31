@@ -1,6 +1,10 @@
 import YahooFinance from 'yahoo-finance2';
 import { getFmpFundamentals } from './fmp';
 import { getAlphaVantageFundamentals } from './alphaVantage';
+import { exec } from 'node:child_process';
+import util from 'node:util';
+
+const execPromise = util.promisify(exec);
 
 const parseAV = (val: any) => (val === 'None' || !val) ? null : parseFloat(val);
 
@@ -161,6 +165,20 @@ export async function fetchYahooQuote(ticker: string) {
   }
 }
 
+export async function fetchPriceHistoryYFinance(ticker: string): Promise<any[]> {
+  try {
+    const { stdout } = await execPromise(`python3 -m scripts.research_engine.fetch_history ${ticker}`);
+    const data = JSON.parse(stdout);
+    if (Array.isArray(data)) {
+      return data;
+    }
+    return [];
+  } catch (e) {
+    console.error("Failed to fetch price history via yfinance", e);
+    return [];
+  }
+}
+
 export async function fetchFinnhubNews(ticker: string) {
   const apiKey = process.env.VITE_FINNHUB_KEY;
   if (!apiKey) return null;
@@ -188,10 +206,12 @@ export async function fetchFinnhubNews(ticker: string) {
 export async function aggregateInsightsData(ticker: string) {
   const [
     yahooQuote,
-    finnhubNews
+    finnhubNews,
+    historicalPriceData
   ] = await Promise.all([
     fetchYahooQuote(ticker),
-    fetchFinnhubNews(ticker)
+    fetchFinnhubNews(ticker),
+    fetchPriceHistoryYFinance(ticker)
   ]);
 
   let provider = 'FMP';
@@ -219,6 +239,7 @@ export async function aggregateInsightsData(ticker: string) {
   }
 
   const { annual: aData, quarterly: qData, ttm: ttmData = {}, pricing = {}, indexes = {} } = fmpData;
+  pricing.historical = historicalPriceData;
   
   const qIncome = qData.income || [];
   const qBalance = qData.balance || [];
