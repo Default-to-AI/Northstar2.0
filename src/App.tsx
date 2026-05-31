@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutDashboard, List, Users, Archive as ArchiveIcon, UserCircle, Sparkles, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, List, Users, Archive as ArchiveIcon, UserCircle, Sparkles, BarChart3, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import CommandCenter from './pages/CommandCenter';
 import Dashboard from './pages/Dashboard';
@@ -12,8 +12,10 @@ import Scanner from './pages/Scanner';
 import ScannerInsights from './pages/ScannerInsights';
 import EvidencePacket from './pages/EvidencePacket';
 import InsightsTicker from './pages/InsightsTicker';
+import SP500 from './pages/SP500';
 import { Badge } from '@/components/ui/badge';
-import PipelineReadinessIndicator from './components/PipelineReadinessIndicator';
+import MarketIndicesHeader from './components/MarketIndicesHeader';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +45,7 @@ function Sidebar() {
     { to: '/committee', icon: Users, label: 'Committee' },
     { to: '/scanner', icon: Sparkles, label: 'Scanner' },
     { to: '/insights', icon: BarChart3, label: 'Insights' },
+    { to: '/sp500', icon: TrendingUp, label: 'S&P 500' },
     { to: '/archive', icon: ArchiveIcon, label: 'Archive' },
     { to: '/profile', icon: UserCircle, label: 'Profile' },
   ];
@@ -89,14 +92,9 @@ export default function App() {
           <main className="flex-1 flex flex-col overflow-hidden">
             <header className="h-12 border-b border-border flex items-center justify-between px-6 bg-background sticky top-0 z-10 w-full shrink-0">
               <div className="flex items-center gap-4">
-                <span className="text-[11px] font-mono text-foreground font-bold uppercase tracking-tight">Active Session: PORTFOLIO_ALPHA_ONE</span>
-                <PipelineReadinessIndicator />
-              </div>
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="bg-primary text-primary-foreground border-none text-[9px] font-mono rounded-none px-2 py-0 font-bold uppercase">
-                  SERVER DATA MODE
-                </Badge>
-                <div className="w-2 h-2 rounded-full bg-positive animate-pulse" />
+                <ErrorBoundary>
+                  <MarketIndicesHeader />
+                </ErrorBoundary>
               </div>
             </header>
             <div className="flex-1 overflow-y-auto">
@@ -110,6 +108,7 @@ export default function App() {
                 <Route path="/insights" element={<ScannerInsights />} />
                 <Route path="/insights/:ticker" element={<InsightsTicker />} />
                 <Route path="/security/:ticker" element={<EvidencePacket />} />
+                <Route path="/sp500" element={<SP500 />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -152,6 +152,8 @@ def migrate(conn: sqlite3.Connection) -> None:
         """)
         _migrate_v2(conn)
         _migrate_v3(conn)
+        _migrate_v4(conn)
+        _migrate_v5(conn)
         _ensure_columns(conn)
         _backfill_legacy(conn)
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -222,6 +224,40 @@ def _migrate_v3(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _migrate_v4(conn: sqlite3.Connection) -> None:
+    """V4: SBC-adjusted EV/EBITDA + data normalization events for cross-source validation."""
+    _add_column_if_missing(conn, "fundamentals", "sbc_add_back", "REAL")
+    _add_column_if_missing(conn, "fundamentals", "ev_to_ebitda_normalized", "REAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS data_normalization_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            sources_json TEXT NOT NULL,
+            median_value REAL NOT NULL,
+            outlier_source TEXT NOT NULL,
+            deviation_pct REAL NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(ticker) REFERENCES securities(ticker)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_norm_events_ticker_date
+        ON data_normalization_events(ticker, created_at)
+    """)
+
+
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    """V5: Sector metrics table for dynamic sector P/E automation."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sector_metrics (
+            sector_name TEXT PRIMARY KEY,
+            pe_ratio REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     """Return column names for an existing SQLite table."""
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
@@ -253,6 +289,8 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, "fundamentals", "pipeline_run_id", "INTEGER")
         _add_column_if_missing(conn, "fundamentals", "source_run_id", "INTEGER")
         _add_column_if_missing(conn, "fundamentals", "avg_dollar_volume", "REAL")
+        _add_column_if_missing(conn, "fundamentals", "sbc_add_back", "REAL")
+        _add_column_if_missing(conn, "fundamentals", "ev_to_ebitda_normalized", "REAL")
 
     if conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='score_snapshots'").fetchone():
         _add_column_if_missing(conn, "score_snapshots", "factor_snapshot_id", "INTEGER")
