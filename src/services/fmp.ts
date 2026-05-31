@@ -53,8 +53,14 @@ export async function fetchFMPEndpoint(ticker: string, endpoint: string, queryPa
     
     const data = await res.json();
     
-    // Save to Cache if data is valid array
-    if (Array.isArray(data) && data.length > 0) {
+    // Check for FMP Error payload
+    if (data && data['Error Message']) {
+      console.error(`FMP Rate Limit / Error for ${endpoint} ${ticker}:`, data['Error Message']);
+      return row ? JSON.parse(row.data) : null;
+    }
+    
+    // Save to Cache if data is valid array or an object with a valid array payload
+    if ((Array.isArray(data) && data.length > 0) || (data && Array.isArray(data.historical) && data.historical.length > 0)) {
       const insertStmt = db.prepare(`
         INSERT INTO fmp_cache (ticker, endpoint, params, data, timestamp) 
         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -94,9 +100,9 @@ export async function getFmpFundamentals(ticker: string) {
 
   // Fetch Index Quotes
   const [spyQuote, qqqQuote, diaQuote] = await Promise.all([
-    fetchFMPEndpoint('SPY', 'stable/quote-short', ''),
-    fetchFMPEndpoint('QQQ', 'stable/quote-short', ''),
-    fetchFMPEndpoint('DIA', 'stable/quote-short', '')
+    fetchFMPEndpoint('SPY', 'stable/quote', ''),
+    fetchFMPEndpoint('QQQ', 'stable/quote', ''),
+    fetchFMPEndpoint('DJIA', 'stable/quote', '')
   ]);
 
   return {
@@ -119,7 +125,7 @@ export async function getFmpFundamentals(ticker: string) {
     },
     pricing: {
       priceChange: Array.isArray(priceChange) && priceChange.length > 0 ? priceChange[0] : null,
-      historical: Array.isArray(historicalPrices) ? historicalPrices.slice(0, 100) : [] // Limit to 100 days
+      historical: Array.isArray(historicalPrices?.historical) ? historicalPrices.historical.slice(0, 100) : [] // Limit to 100 days
     },
     indexes: {
       spy: Array.isArray(spyQuote) && spyQuote.length > 0 ? spyQuote[0] : null,

@@ -14,7 +14,8 @@ import EvidencePacket from './pages/EvidencePacket';
 import InsightsTicker from './pages/InsightsTicker';
 import SP500 from './pages/SP500';
 import { Badge } from '@/components/ui/badge';
-import PipelineReadinessIndicator from './components/PipelineReadinessIndicator';
+import MarketIndicesHeader from './components/MarketIndicesHeader';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -91,14 +92,9 @@ export default function App() {
           <main className="flex-1 flex flex-col overflow-hidden">
             <header className="h-12 border-b border-border flex items-center justify-between px-6 bg-background sticky top-0 z-10 w-full shrink-0">
               <div className="flex items-center gap-4">
-                <span className="text-[11px] font-mono text-foreground font-bold uppercase tracking-tight">Active Session: PORTFOLIO_ALPHA_ONE</span>
-                <PipelineReadinessIndicator />
-              </div>
-              <div className="flex items-center gap-3">
-                <Badge variant="outline" className="bg-primary text-primary-foreground border-none text-[9px] font-mono rounded-none px-2 py-0 font-bold uppercase">
-                  SERVER DATA MODE
-                </Badge>
-                <div className="w-2 h-2 rounded-full bg-positive animate-pulse" />
+                <ErrorBoundary>
+                  <MarketIndicesHeader />
+                </ErrorBoundary>
               </div>
             </header>
             <div className="flex-1 overflow-y-auto">

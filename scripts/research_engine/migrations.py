@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -153,6 +153,7 @@ def migrate(conn: sqlite3.Connection) -> None:
         _migrate_v2(conn)
         _migrate_v3(conn)
         _migrate_v4(conn)
+        _migrate_v5(conn)
         _ensure_columns(conn)
         _backfill_legacy(conn)
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
@@ -243,6 +244,17 @@ def _migrate_v4(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_norm_events_ticker_date
         ON data_normalization_events(ticker, created_at)
+    """)
+
+
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    """V5: Sector metrics table for dynamic sector P/E automation."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sector_metrics (
+            sector_name TEXT PRIMARY KEY,
+            pe_ratio REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
     """)
 
 

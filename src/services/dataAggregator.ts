@@ -93,7 +93,7 @@ function validateMetric(
   thresholdPct: number = 2
 ): { validatedValue: number | null; events: DataNormalizationEvent[] } {
   const valid = sources.filter((s): s is { name: string; value: number } =>
-    s.value !== null && s.value !== undefined && Number.isFinite(s.value) && s.value > 0
+    s.value !== null && s.value !== undefined && Number.isFinite(s.value) && s.value !== 0
   );
   if (valid.length === 0) return { validatedValue: null, events: [] };
   if (valid.length === 1) return { validatedValue: valid[0].value, events: [] };
@@ -241,7 +241,13 @@ export async function aggregateInsightsData(ticker: string) {
   const currentPrice = yahooQuote?.price?.regularMarketPrice;
 
   // P/E (TTM) — from Yahoo trailing 4-quarter net income
-  const peTtmYahoo = yahooQuote?.summaryDetail?.trailingPE ?? null;
+  let peTtmYahoo = yahooQuote?.summaryDetail?.trailingPE ?? null;
+  if (peTtmYahoo === null && currentPrice && yahooQuote?.defaultKeyStatistics?.trailingEps) {
+    const trailingEps = yahooQuote.defaultKeyStatistics.trailingEps;
+    if (trailingEps !== 0) {
+      peTtmYahoo = currentPrice / trailingEps;
+    }
+  }
   // P/E (NTM) — from Yahoo forward consensus 12-month earnings
   const peNtmYahoo = yahooQuote?.summaryDetail?.forwardPE ?? null;
 

@@ -18,10 +18,6 @@ To authorize your requests, append ?apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg at t
 
 Note: When adding the API key to your requests, ensure to use &apikey= if other query parameters already exist in the endpoint.
 
-
-
-
-
 Key Metrics TTM API: https://financialmodelingprep.com/stable/key-metrics-ttm?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
 - marketCap
 - evToEBITDATTM
@@ -69,3 +65,6 @@ Stock Price Change API: https://financialmodelingprep.com/stable/stock-price-cha
 
 Sector P\E Snapshot API: https://financialmodelingprep.com/stable/sector-pe-snapshot?date=2024-02-01&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
 - All Sectors. Compare right sector with stocks PE to color that metric logically. Above / Way above average , Below / way below , on the average give or take.
+
+Stock Chart Light API: https://financialmodelingprep.com/stable/historical-price-eod/light?symbol=AAPL&apikey=3WH0DuSD9pSzHG2OEdBObuPKccp4pKvg
+- Chart a price graph

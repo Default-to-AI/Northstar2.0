@@ -12,7 +12,8 @@ import {exec, spawn} from 'node:child_process';
 import YahooFinance from 'yahoo-finance2';
 
 import {fetchCnnFearGreedSnapshot} from '../lib/fearGreedService.ts';
-import {aggregateInsightsData, aggregateAnalystEstimates, type DataNormalizationEvent} from '../services/dataAggregator.ts';
+import {fetchFMPEndpoint} from '../services/fmp.ts';
+import {aggregateInsightsData, aggregateAnalystEstimates, fetchYahooQuote, type DataNormalizationEvent} from '../services/dataAggregator.ts';
 import {buildIbkrPortfolioAnalytics} from './ibkrAnalytics.ts';
 import type {IBKRPortfolioSnapshot} from '../types/ibkr';
 import {openResearchDb, resolveResearchDbPath} from './research/db.ts';
@@ -506,6 +507,35 @@ function registerApiRoutes(app: Express): void {
     } catch (error) {
       console.error('Fear & Greed fetch error:', error);
       return res.status(500).json({error: 'Failed to fetch Fear & Greed index'});
+    }
+  });
+
+  app.get('/api/market/indices', async (_req: Request, res: Response) => {
+    try {
+      // Use YahooFinance instead of FMP because FMP restricts index quotes on the free tier
+      const yf = new YahooFinance();
+      const [spyQuote, qqqQuote, djiaQuote] = await Promise.all([
+        yf.quote('^GSPC').catch(() => null),
+        yf.quote('^IXIC').catch(() => null),
+        yf.quote('^DJI').catch(() => null)
+      ]);
+
+      const formatQuote = (q: any) => {
+        if (!q) return null;
+        return {
+          price: q.regularMarketPrice,
+          changePercentage: q.regularMarketChangePercent
+        };
+      };
+
+      return res.json({
+        spy: formatQuote(spyQuote),
+        qqq: formatQuote(qqqQuote),
+        djia: formatQuote(djiaQuote)
+      });
+    } catch (error: any) {
+      console.error('Indices fetch error:', error);
+      return res.status(500).json({error: error.message || 'Failed to fetch indices quotes'});
     }
   });
 
@@ -1670,6 +1700,68 @@ function registerApiRoutes(app: Express): void {
         // Table might not exist yet, ignore
         console.warn('Cache clear error (may not exist):', error);
         return res.json({success: true});
+      }
+    }
+  );
+
+  app.get(
+    '/api/insights/:ticker/dev-patch',
+    async (req: Request<SecurityTickerParams>, res: Response) => {
+      const ticker = req.params.ticker?.toUpperCase();
+      if (!ticker) {
+        return res.status(400).json({error: 'Ticker is required'});
+      }
+      try {
+        const yahooQuote = await fetchYahooQuote(ticker);
+        
+        let peTtmYahoo = yahooQuote?.summaryDetail?.trailingPE ?? null;
+        if (peTtmYahoo === null && yahooQuote?.financialData?.currentPrice && yahooQuote?.defaultKeyStatistics?.trailingEps) {
+          const currentPrice = yahooQuote.financialData.currentPrice;
+          const trailingEps = yahooQuote.defaultKeyStatistics.trailingEps;
+          if (trailingEps !== 0) {
+            peTtmYahoo = currentPrice / trailingEps;
+          }
+        }
+        
+        const peNtmYahoo = yahooQuote?.summaryDetail?.forwardPE ?? null;
+        const ps = yahooQuote?.summaryDetail?.priceToSalesTrailing12Months ?? null;
+        const pb = yahooQuote?.defaultKeyStatistics?.priceToBook ?? null;
+        const divYield = yahooQuote?.summaryDetail?.dividendYield ? yahooQuote.summaryDetail.dividendYield * 100 : null;
+        const payoutRatio = yahooQuote?.summaryDetail?.payoutRatio ? yahooQuote.summaryDetail.payoutRatio * 100 : null;
+        const exDivDate = yahooQuote?.summaryDetail?.exDividendDate ? new Date(yahooQuote.summaryDetail.exDividendDate).toLocaleDateString() : null;
+
+        return res.json({
+          peTtm: peTtmYahoo,
+          peNtm: peNtmYahoo,
+          ps,
+          pb,
+          divYield,
+          payoutRatio,
+          exDivDate
+        });
+      } catch (error) {
+        console.error('dev-patch error:', error);
+        return res.status(500).json({error: 'Failed to fetch dev patch'});
+      }
+    }
+  );
+
+  app.get(
+    '/api/insights/sector-pe',
+    async (_req: Request, res: Response) => {
+      try {
+        const db = openResearchDb();
+        const rows = db.prepare(`SELECT sector_name, pe_ratio FROM sector_metrics`).all() as any[];
+        db.close();
+        
+        const metrics: Record<string, number> = {};
+        for (const row of rows) {
+          metrics[row.sector_name] = row.pe_ratio;
+        }
+        return res.json(metrics);
+      } catch (error) {
+        console.error('Sector PE fetch error:', error);
+        return res.json({});
       }
     }
   );

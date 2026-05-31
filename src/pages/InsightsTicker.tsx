@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown, Info } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -29,6 +29,10 @@ function PanelTitle({ children }: { children: React.ReactNode }) {
 
 function MissingData() {
   return <span className="text-rose-500/80 font-mono text-[10px] bg-rose-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">Missing Data</span>;
+}
+
+function NoneBadge({ text = "None" }: { text?: string }) {
+  return <span className="text-muted-foreground/80 font-mono text-[10px] bg-white/5 px-1.5 py-0.5 rounded uppercase tracking-wider">{text}</span>;
 }
 
 function CompanyLogo({ ticker, name }: { ticker: string, name: string }) {
@@ -68,6 +72,7 @@ const TOP_MCAP_RANKS: Record<string, number> = {
 
 // Format numbers for Y-Axis (Integers only, with $)
 function formatYAxisTick(num: number) {
+  if (num == null) return '';
   if (num === 0) return '$0';
   if (Math.abs(num) >= 1e12) return `$${Math.round(num / 1e12)}T`;
   if (Math.abs(num) >= 1e9) return `$${Math.round(num / 1e9)}B`;
@@ -97,6 +102,7 @@ function RelativeTimeDisplay({ timestamp }: { timestamp: string }) {
 
 // Format numbers for generic large values (e.g. Market Cap)
 function formatLargeNumber(num: number) {
+  if (num == null) return '—';
   if (num === 0) return '0';
   if (Math.abs(num) >= 1e12) return `${(num / 1e12).toFixed(2)}T`;
   if (Math.abs(num) >= 1e9) return `${(num / 1e9).toFixed(2)}B`;
@@ -104,7 +110,7 @@ function formatLargeNumber(num: number) {
   return num.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function getMetricColor(value: number | undefined | null, metricType: string) {
+function getMetricColor(value: number | undefined | null, metricType: string, sector?: string | null, sectorPeMap?: Record<string, number>) {
   if (value === undefined || value === null) return 'text-white';
   
   if (metricType === 'piotroski') {
@@ -113,6 +119,7 @@ function getMetricColor(value: number | undefined | null, metricType: string) {
     return 'text-rose-400';
   }
   if (metricType === 'peg') {
+    if (value <= 0) return 'text-rose-400';
     if (value < 1.0) return 'text-emerald-400';
     if (value <= 1.5) return 'text-amber-400';
     return 'text-rose-400';
@@ -133,21 +140,36 @@ function getMetricColor(value: number | undefined | null, metricType: string) {
     return 'text-rose-400';
   }
   if (metricType === 'pe') {
-    if (value < 15) return 'text-emerald-400';
-    if (value <= 25) return 'text-amber-400';
+    if (value <= 0) return 'text-rose-400';
+    
+    let targetPe = 25; // Default average PE
+    
+    if (sector && sectorPeMap && sectorPeMap[sector]) {
+      targetPe = sectorPeMap[sector];
+    } else if (sector && sectorPeMap) {
+      // Find a partial match just in case
+      const found = Object.keys(sectorPeMap).find(k => sector.toLowerCase().includes(k.toLowerCase()));
+      if (found) targetPe = sectorPeMap[found];
+    }
+    
+    if (value < targetPe * 0.7) return 'text-emerald-400';
+    if (value <= targetPe * 1.1) return 'text-amber-400';
     return 'text-rose-400';
   }
   if (metricType === 'ps') {
+    if (value <= 0) return 'text-rose-400';
     if (value < 2) return 'text-emerald-400';
     if (value <= 5) return 'text-amber-400';
     return 'text-rose-400';
   }
   if (metricType === 'pb') {
+    if (value <= 0) return 'text-rose-400';
     if (value < 1.5) return 'text-emerald-400';
     if (value <= 3) return 'text-amber-400';
     return 'text-rose-400';
   }
   if (metricType === 'evEbitda') {
+    if (value <= 0) return 'text-rose-400';
     if (value < 10) return 'text-emerald-400';
     if (value <= 15) return 'text-amber-400';
     return 'text-rose-400';
@@ -158,6 +180,7 @@ function getMetricColor(value: number | undefined | null, metricType: string) {
     return 'text-rose-400';
   }
   if (metricType === 'sbcImpact') {
+    if (value < 0) return 'text-rose-400';
     if (value < 10) return 'text-emerald-400';
     if (value <= 20) return 'text-amber-400';
     return 'text-rose-400';
@@ -178,6 +201,7 @@ function getMetricColor(value: number | undefined | null, metricType: string) {
     return 'text-white';
   }
   if (metricType === 'payoutRatio') {
+    if (value < 0) return 'text-rose-400';
     if (value < 50) return 'text-emerald-400';
     if (value <= 75) return 'text-amber-400';
     return 'text-rose-400';
@@ -255,7 +279,6 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
     const cagr = (Math.pow(currentVal / pastVal, 1 / years) - 1) * 100;
     return cagr.toFixed(2);
   };
-
   const cagr1 = calculateGrowth(1);
   const cagr3 = calculateGrowth(3);
   const cagr5 = calculateGrowth(5);
@@ -298,9 +321,11 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
 export default function InsightsTicker() {
   const { ticker = '' } = useParams<{ ticker: string }>();
   const normalizedTicker = useMemo(() => ticker.trim().toUpperCase(), [ticker]);
+  const queryClient = useQueryClient();
   const [timeframe, setTimeframe] = useState<'Quarterly' | 'TTM' | 'Annually'>('Quarterly');
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
   const [expandedTimeframe, setExpandedTimeframe] = useState<'One Year' | 'Two Years' | 'Three Years' | 'Five Years' | 'Ten Years' | 'All'>('Five Years');
+  const [isPatching, setIsPatching] = useState(false);
 
   // --- Data Fetching ---
   const { data, isLoading, isError } = useQuery<InsightsTickerResponse>({
@@ -333,12 +358,43 @@ export default function InsightsTicker() {
     enabled: normalizedTicker.length > 0,
   });
 
+  const { data: sectorPeData } = useQuery<Record<string, number>>({
+    queryKey: ['sector-pe'],
+    queryFn: async () => {
+      const res = await fetch(`/api/insights/sector-pe`);
+      if (!res.ok) throw new Error('Failed to fetch sector PEs');
+      return res.json();
+    },
+  });
+
   const agg = data?.aggregatedData || {};
+
+  const getSectorPeTooltip = () => {
+    const sector = agg?.profile?.sector;
+    if (!sector || !sectorPeData) return null;
+    let targetPe = 25;
+    let foundName = sector;
+    if (sectorPeData[sector]) {
+      targetPe = sectorPeData[sector];
+    } else {
+      const found = Object.keys(sectorPeData).find(k => sector.toLowerCase().includes(k.toLowerCase()));
+      if (found) {
+        targetPe = sectorPeData[found];
+        foundName = found;
+      }
+    }
+    return `${foundName} Avg PE: ${targetPe.toFixed(2)}`;
+  };
+  const peTooltip = getSectorPeTooltip();
 
   const historicalData = useMemo(() => {
     if (!agg?.pricing?.historical) return [];
     return [...agg.pricing.historical].reverse();
   }, [agg?.pricing?.historical]);
+
+  const currentChartData = useMemo(() => {
+    return timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
+  }, [timeframe, agg?.charts]);
 
   if (isLoading) {
     return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-primary" /></div>;
@@ -353,8 +409,6 @@ export default function InsightsTicker() {
   
   const snapshotModule = data?.modules.find(m => m.title === 'SNAPSHOT') as InsightKpiModule | undefined;
   const getMetric = (label: string) => snapshotModule?.items.find(i => i.label === label)?.value || '—';
-  
-  const currentChartData = timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
 
   return (
     <div className="bg-[#0f1015] min-h-screen text-foreground p-6 space-y-6 overflow-y-auto">
@@ -414,11 +468,6 @@ export default function InsightsTicker() {
 
       {/* 1. Header Area */}
       <div className="relative">
-        <div className="absolute top-0 right-0 flex gap-4 text-[11px] font-mono text-muted-foreground bg-[#1a1b23] px-3 py-1.5 rounded-bl-lg border-b border-l border-[#2a2b36]">
-          <span>Dow Jones {agg?.indexes?.dia?.price ? <span className={agg.indexes.dia.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.dia.price.toFixed(2)}</span> : <MissingData />}</span>
-          <span>S&P 500 {agg?.indexes?.spy?.price ? <span className={agg.indexes.spy.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.spy.price.toFixed(2)}</span> : <MissingData />}</span>
-          <span>Nasdaq {agg?.indexes?.qqq?.price ? <span className={agg.indexes.qqq.changesPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}>${agg.indexes.qqq.price.toFixed(2)}</span> : <MissingData />}</span>
-        </div>
         
         <div className="flex flex-col items-center justify-center pt-8 pb-4">
           <div className="relative w-96 mb-6">
@@ -441,19 +490,58 @@ export default function InsightsTicker() {
                 <>Last Data Refresh: <MissingData /></>
               )}
             </div>
-            <button 
-              onClick={async () => {
-                try {
-                  await fetch(`/api/insights/${normalizedTicker}/refresh`, { method: 'POST' });
-                  window.location.reload();
-                } catch (e) {
-                  console.error('Failed to refresh cache', e);
-                }
-              }}
-              className="text-[10px] text-muted-foreground hover:text-white underline underline-offset-2 transition-colors cursor-pointer"
-            >
-              Clear Cache & Refresh
-            </button>
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={async () => {
+                  try {
+                    await fetch(`/api/insights/${normalizedTicker}/refresh`, { method: 'POST' });
+                    window.location.reload();
+                  } catch (e) {
+                    console.error('Failed to refresh cache', e);
+                  }
+                }}
+                className="text-[10px] text-muted-foreground hover:text-white underline underline-offset-2 transition-colors cursor-pointer"
+              >
+                Clear Cache & Refresh
+              </button>
+              {process.env.NODE_ENV === 'development' && (
+                <button
+                  disabled={isPatching}
+                  onClick={async () => {
+                    try {
+                      setIsPatching(true);
+                      const res = await fetch(`/api/insights/${normalizedTicker}/dev-patch`);
+                      if (!res.ok) throw new Error('Failed to fetch dev patch');
+                      const patch = await res.json();
+                      
+                      queryClient.setQueryData(['insights-ticker', normalizedTicker], (old: any) => {
+                        if (!old) return old;
+                        const newAgg = { ...old.aggregatedData };
+                        if (newAgg.valuation) {
+                          if (newAgg.valuation.pe.ttm == null && patch.peTtm != null) newAgg.valuation.pe.ttm = patch.peTtm;
+                          if (newAgg.valuation.pe.ntm == null && patch.peNtm != null) newAgg.valuation.pe.ntm = patch.peNtm;
+                          if (newAgg.valuation.ps == null && patch.ps != null) newAgg.valuation.ps = patch.ps;
+                          if (newAgg.valuation.pb == null && patch.pb != null) newAgg.valuation.pb = patch.pb;
+                        }
+                        if (newAgg.dividend) {
+                          if (newAgg.dividend.divYield == null && patch.divYield !== undefined) newAgg.dividend.divYield = patch.divYield;
+                          if (newAgg.dividend.payoutRatio == null && patch.payoutRatio !== undefined) newAgg.dividend.payoutRatio = patch.payoutRatio;
+                          if (newAgg.dividend.exDivDate == null && patch.exDivDate !== undefined) newAgg.dividend.exDivDate = patch.exDivDate;
+                        }
+                        return { ...old, aggregatedData: newAgg };
+                      });
+                    } catch (e) {
+                      console.error('Patch Error:', e);
+                    } finally {
+                      setIsPatching(false);
+                    }
+                  }}
+                  className="text-[10px] text-amber-500/80 hover:text-amber-400 underline underline-offset-2 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {isPatching ? 'Patching...' : 'Populate Missing Data (Dev API)'}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-4 mb-4">
@@ -527,25 +615,40 @@ export default function InsightsTicker() {
                 {TOP_MCAP_RANKS[ticker!] && <span className="ml-1.5 text-xs text-sky-400 font-bold bg-sky-400/10 px-1 rounded-sm">(#{TOP_MCAP_RANKS[ticker!]})</span>}
               </span>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">P/E (TTM):</span>
-              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.ttm, 'pe'))}>
+            <div className="flex justify-between items-center group relative cursor-help">
+              <span className="text-muted-foreground flex items-center gap-1">P/E (TTM): <Info className="w-3 h-3" /></span>
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.ttm, 'pe', agg?.profile?.sector, sectorPeData))}>
                 {agg?.valuation?.pe?.ttm ? agg.valuation.pe.ttm.toFixed(2) : <MissingData />}
                 {agg?.valuation?.normalizationEvents?.some((e: any) => e.metric === 'PE_TTM') && (
                   <span title={`Cross-source deviation >2% — using median. ${agg.valuation.normalizationEvents.filter((e: any) => e.metric === 'PE_TTM').map((e: any) => `${e.outlierSource}: ${e.deviation.toFixed(2)}%`).join(', ')}`} className="text-amber-400 cursor-help text-[10px]">⚠</span>
                 )}
               </span>
+              {peTooltip && (
+                <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-max bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded py-1 px-2 z-50 shadow-xl">
+                  {peTooltip}
+                </div>
+              )}
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">P/E (NTM):</span>
-              <span className={getMetricColor(agg?.valuation?.pe?.ntm, 'pe')}>{agg?.valuation?.pe?.ntm ? agg.valuation.pe.ntm.toFixed(2) : <MissingData />}</span>
+            <div className="flex justify-between items-center group relative cursor-help">
+              <span className="text-muted-foreground flex items-center gap-1">P/E (NTM): <Info className="w-3 h-3" /></span>
+              <span className={getMetricColor(agg?.valuation?.pe?.ntm, 'pe', agg?.profile?.sector, sectorPeData)}>{agg?.valuation?.pe?.ntm ? agg.valuation.pe.ntm.toFixed(2) : <MissingData />}</span>
+              {peTooltip && (
+                <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-max bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded py-1 px-2 z-50 shadow-xl">
+                  {peTooltip}
+                </div>
+              )}
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-muted-foreground">P/E (2027E):</span>
-              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.fy2027, 'pe'))}>
+            <div className="flex justify-between items-center group relative cursor-help">
+              <span className="text-muted-foreground flex items-center gap-1">P/E (2027E): <Info className="w-3 h-3" /></span>
+              <span className={cn("flex items-center gap-1", getMetricColor(agg?.valuation?.pe?.fy2027, 'pe', agg?.profile?.sector, sectorPeData))}>
                 {agg?.valuation?.pe?.fy2027 ? agg.valuation.pe.fy2027.toFixed(2) : <MissingData />}
                 {agg?.valuation?.pe?.fy2027 && <span className="text-[9px] text-muted-foreground ml-0.5" title="Extrapolated from long-term growth rate applied to NTM EPS">est.</span>}
               </span>
+              {peTooltip && (
+                <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-max bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded py-1 px-2 z-50 shadow-xl">
+                  {peTooltip}
+                </div>
+              )}
             </div>
             <div className="flex justify-between items-center">
               <span className="text-muted-foreground">EV/EBITDA (TTM):</span>
@@ -614,9 +717,9 @@ export default function InsightsTicker() {
           </div>
           <div className="space-y-2">
             <h4 className="font-semibold text-white mb-4">Dividend</h4>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Dividend Yield:</span> <span className={getMetricColor(agg?.dividend?.divYield, 'divYield')}>{agg?.dividend?.divYield != null ? `${agg.dividend.divYield.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Ratio:</span> <span className={getMetricColor(agg?.dividend?.payoutRatio, 'payoutRatio')}>{agg?.dividend?.payoutRatio != null ? `${agg.dividend.payoutRatio.toFixed(2)}%` : <MissingData />}</span></div>
-            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Date:</span> <span>{agg?.dividend?.exDivDate || <MissingData />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Dividend Yield:</span> <span className={getMetricColor(agg?.dividend?.divYield, 'divYield')}>{agg?.dividend?.divYield != null ? `${agg.dividend.divYield.toFixed(2)}%` : <NoneBadge />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Ratio:</span> <span className={getMetricColor(agg?.dividend?.payoutRatio, 'payoutRatio')}>{agg?.dividend?.payoutRatio != null ? `${agg.dividend.payoutRatio.toFixed(2)}%` : <NoneBadge />}</span></div>
+            <div className="flex justify-between items-center"><span className="text-muted-foreground">Payout Date:</span> <span>{agg?.dividend?.exDivDate || <NoneBadge />}</span></div>
           </div>
         </div>
       </Panel>
@@ -725,8 +828,8 @@ export default function InsightsTicker() {
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Website</span> {agg?.profile?.website ? <a href={agg.profile.website} className="text-sky-400 hover:underline" target="_blank" rel="noreferrer">{agg.profile.website}</a> : <MissingData />}</div>
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Sector</span> <span>{agg?.profile?.sector || <MissingData />}</span></div>
             <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Industry</span> <span>{agg?.profile?.industry || <MissingData />}</span></div>
-            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Full Time Employees</span> <span>{agg?.profile?.employees ? agg.profile.employees.toLocaleString() : <MissingData />}</span></div>
-            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Beta</span> <span>{agg?.profile?.beta ? agg.profile.beta.toFixed(3) : <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Full Time Employees</span> <span>{typeof agg?.profile?.employees === 'number' ? agg.profile.employees.toLocaleString() : <MissingData />}</span></div>
+            <div className="flex justify-between py-1 border-b border-[#2a2b36] items-center"><span className="text-muted-foreground">Beta</span> <span>{typeof agg?.profile?.beta === 'number' ? agg.profile.beta.toFixed(3) : <MissingData />}</span></div>
             <div className="flex justify-between py-1 items-center"><span className="text-muted-foreground">Piotroski Score:</span> <span className={getMetricColor(agg?.ratios?.piotroskiScore, 'piotroski')}>{agg?.ratios?.piotroskiScore != null && agg?.ratios?.piotroskiScore !== null ? <span className="font-bold">{agg.ratios.piotroskiScore}/9</span> : <MissingData />}</span></div>
           </div>
         </Panel>
