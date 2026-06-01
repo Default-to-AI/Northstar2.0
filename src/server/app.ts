@@ -333,6 +333,21 @@ function createAiClient(): GoogleGenAI {
 function registerApiRoutes(app: Express): void {
   const ai = createAiClient();
 
+  app.get('/api/logo/ticker/:ticker', (req: Request<{ticker: string}>, res: Response) => {
+    const ticker = req.params.ticker?.trim().toUpperCase();
+    if (!ticker) {
+      return res.status(400).json({error: 'ticker is required'});
+    }
+
+    const token = process.env.LOGO_DEV_TOKEN || process.env.VITE_LOGO_DEV_TOKEN;
+    if (!token) {
+      return res.status(503).json({error: 'Logo token not configured (LOGO_DEV_TOKEN or VITE_LOGO_DEV_TOKEN)'});
+    }
+
+    const url = `https://img.logo.dev/ticker/${encodeURIComponent(ticker)}?token=${encodeURIComponent(token)}&size=128&format=png&theme=dark&retina=true`;
+    return res.redirect(302, url);
+  });
+
   app.post(
     '/api/committee/session',
     async (

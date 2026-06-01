@@ -103,11 +103,11 @@ function CompanyLogo({ ticker }: { ticker: string }) {
   }
 
   return (
-    <div className="w-6 h-6 rounded bg-white flex items-center justify-center overflow-hidden shrink-0 p-0.5">
+    <div className="w-6 h-6 rounded border border-black/70 bg-[#0f1015] flex items-center justify-center overflow-hidden shrink-0">
       <img 
-        src={`https://img.logo.dev/ticker/${ticker}?token=pk_CyCNK430RpK33Qe6o3xFlw&size=60`} 
+        src={`/api/logo/ticker/${encodeURIComponent(ticker)}`} 
         alt={`${ticker} logo`} 
-        className="w-full h-full object-contain"
+        className="w-full h-full object-cover"
         onError={() => setError(true)}
         loading="lazy"
       />

@@ -35,29 +35,24 @@ function NoneBadge({ text = "None" }: { text?: string }) {
   return <span className="text-muted-foreground/80 font-mono text-[10px] bg-white/5 px-1.5 py-0.5 rounded uppercase tracking-wider">{text}</span>;
 }
 
-function CompanyLogo({ ticker, name }: { ticker: string, name: string }) {
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    setError(false);
-  }, [ticker]);
-
-  if (error) {
-    return (
-      <div className="w-12 h-12 rounded-md bg-[#2a2b36] flex items-center justify-center font-bold text-white text-lg shrink-0">
-        {ticker.charAt(0)}
-      </div>
-    );
-  }
+function CompanyLogo({ ticker, name, className = 'w-12 h-12' }: { ticker: string, name: string, className?: string }) {
+  const logoUrl = `/api/logo/ticker/${encodeURIComponent(ticker)}`;
 
   return (
-    <div className="w-12 h-12 rounded-md bg-white flex items-center justify-center overflow-hidden shrink-0 p-1">
-      <img 
-        src={`https://img.logo.dev/ticker/${ticker}?token=pk_CyCNK430RpK33Qe6o3xFlw&retina=true`} 
-        alt={`${name} logo`} 
-        className="w-full h-full object-contain"
-        onError={() => setError(true)}
+    <div className={`rounded-md border border-black/70 bg-[#0f1015] flex items-center justify-center overflow-hidden shrink-0 ${className}`}>
+      <img
+        src={logoUrl}
+        alt={`${name} logo`}
+        className="w-full h-full object-cover"
+        onError={(e) => {
+          e.currentTarget.style.display = 'none';
+          const fallback = e.currentTarget.nextElementSibling as HTMLElement | null;
+          fallback?.classList.remove('hidden');
+        }}
       />
+      <div className={`bg-emerald-500 rounded-md flex items-center justify-center font-bold text-white hidden w-full h-full`}>
+        {ticker.charAt(0)}
+      </div>
     </div>
   );
 }
@@ -471,15 +466,7 @@ export default function InsightsTicker() {
           <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-xl w-full max-w-6xl h-[80vh] flex flex-col p-6 shadow-2xl relative" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start mb-8 relative">
               <div className="flex items-center gap-4">
-                <img 
-                  src={`https://logo.clearbit.com/${agg?.profile?.website ? new URL(agg.profile.website).hostname.replace(/^www\./, '') : normalizedTicker + '.com'}`}
-                  alt={normalizedTicker}
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none';
-                    e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                  }}
-                  className="w-12 h-12 object-contain bg-white rounded"
-                />
+                <CompanyLogo ticker={normalizedTicker} name={agg?.profile?.name || data?.name || 'Company'} className="w-12 h-12" />
                 <div className="w-12 h-12 bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-2xl hidden">
                   {normalizedTicker.charAt(0)}
                 </div>
@@ -830,22 +817,9 @@ export default function InsightsTicker() {
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="flex items-center gap-2.5">
-                  {title === 'Price' && (
-                    <div className="w-8 h-8 shrink-0 relative">
-                      <img 
-                        src={`https://logo.clearbit.com/${agg?.profile?.website ? new URL(agg.profile.website).hostname.replace(/^www\./, '') : normalizedTicker + '.com'}`}
-                        alt={normalizedTicker}
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                          e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
-                        className="w-full h-full object-contain bg-white rounded"
-                      />
-                      <div className="w-full h-full bg-emerald-500 rounded flex items-center justify-center font-bold text-white text-sm hidden">
-                        {normalizedTicker.charAt(0)}
-                      </div>
-                    </div>
-                  )}
+                  <div className="w-8 h-8 shrink-0 relative">
+                    <CompanyLogo ticker={normalizedTicker} name={agg?.profile?.name || data?.name || 'Company'} className="w-8 h-8" />
+                  </div>
                   <div className="flex flex-col">
                     <span className="text-[13px] font-semibold text-foreground leading-tight">
                       {title === 'Price' ? `Price - ${normalizedTicker}` : title}
@@ -882,7 +856,8 @@ export default function InsightsTicker() {
               onClick={() => setSelectedChart(title)}
             >
               <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2.5">
+                  <CompanyLogo ticker={normalizedTicker} name={agg?.profile?.name || data?.name || 'Company'} className="w-8 h-8" />
                   <span className="text-[12px] font-semibold text-foreground">{title}</span>
                 </div>
                 <button className="text-muted-foreground group-hover:text-white transition-colors">
