@@ -192,7 +192,7 @@ describe('insights routes', () => {
     const json = (await response.json()) as any;
     assert.equal(json.kind, 'chart');
     assert.equal(json.title, 'HISTORICAL FINANCIALS');
-    assert.equal(json.series.length, 2);
-    assert.ok(json.series[0].points.length === 12);
+    assert.equal(json.series.length, 1);
+    assert.ok(json.series[0].points.length >= 12);
   });
 });

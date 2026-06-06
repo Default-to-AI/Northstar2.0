@@ -75,7 +75,8 @@ type InsightsQuery = {
   limit?: string;
 };
 
-type Sp500Query = {
+type ScreenerQuery = {
+  universe?: string;
   sector?: string;
   sort?: string;
   order?: string;
@@ -84,7 +85,7 @@ type Sp500Query = {
   q?: string;
 };
 
-type Sp500Row = {
+type ScreenerRow = {
   ticker: string;
   name: string | null;
   exchange: string | null;
@@ -1295,20 +1296,31 @@ function registerApiRoutes(app: Express): void {
     },
   );
 
-  // ─── S&P 500 Universe Endpoint ────────────────────────────────────────────
+  // ─── Unified Screener Endpoint ────────────────────────────────────────────
   app.get(
-    '/api/research/sp500',
+    '/api/research/screener',
     async (
-      req: Request<Record<string, never>, unknown, unknown, Sp500Query>,
+      req: Request<Record<string, never>, unknown, unknown, ScreenerQuery>,
       res: Response,
     ) => {
+      const universe = (req.query.universe?.trim() || 'sp500').toLowerCase();
       const sector   = req.query.sector?.trim() || null;
-      const sortRaw  = req.query.sort?.trim().toLowerCase() || 'market_cap';
-      const order    = (req.query.order?.trim().toLowerCase() === 'asc') ? 'ASC' : 'DESC';
+      
+      const isThemeTab = false; // We no longer use sector-based theme tabs
+      // Removed legacy themeSectorFilter
+      
+      let defaultSortRaw = 'market_cap';
+      if (universe === 'trending') defaultSortRaw = 'tactical';
+      else if (universe === 'growth') defaultSortRaw = 'revenue_growth';
+
+      const sortRaw  = req.query.sort?.trim().toLowerCase() || defaultSortRaw;
+      const defaultOrder = (sortRaw === 'pe' || sortRaw === 'forward_pe' || sortRaw === 'ticker') ? 'ASC' : 'DESC';
+      const order    = req.query.order ? ((req.query.order?.trim().toLowerCase() === 'asc') ? 'ASC' : 'DESC') : defaultOrder;
+
       const rawLimit = Number.parseInt(req.query.limit  ?? '100', 10);
       const rawOffset= Number.parseInt(req.query.offset ?? '0',   10);
-      const limit    = Number.isFinite(rawLimit)  ? Math.min(Math.max(rawLimit, 1), 503)  : 100;
-      const offset   = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0)                : 0;
+      const limit    = Number.isFinite(rawLimit)  ? Math.min(Math.max(rawLimit, 1), 1000)  : 100;
+      const offset   = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0)                 : 0;
       const q        = req.query.q?.trim().toUpperCase() || null;
 
       const ALLOWED_SORTS: Record<string, string> = {
@@ -1319,6 +1331,7 @@ function registerApiRoutes(app: Express): void {
         forward_pe:      'COALESCE(f.forward_pe, 1e18)',
         revenue_growth:  'COALESCE(f.revenue_growth, -1e18)',
         profit_margin:   'COALESCE(f.profit_margins, -1e18)',
+        high_yield:      '(COALESCE(f.free_cashflow, 0) / COALESCE(NULLIF(f.market_cap, 0), 1e18))',
         price:           'COALESCE(f.current_price, -1e18)',
         ticker:          's.ticker',
       };
@@ -1327,30 +1340,50 @@ function registerApiRoutes(app: Express): void {
       try {
         const db = openResearchDb();
 
-        // Determine if universe_memberships has sp500 rows; fall back to all active if not.
-        const memberCount = (db.prepare(
-          `SELECT COUNT(*) as cnt FROM universe_memberships WHERE universe = 'sp500'`
-        ).get() as {cnt: number}).cnt;
-
-        const useUniverse = memberCount > 0;
-
-        const sectorWhere  = sector ? `AND s.sector = ?`  : '';
-        const searchWhere  = q      ? `AND (UPPER(s.ticker) LIKE ? OR UPPER(COALESCE(s.name,'')) LIKE ?)` : '';
-        const universeJoin = useUniverse
-          ? `JOIN universe_memberships um ON um.ticker = s.ticker AND um.universe = 'sp500'`
-          : '';
-
-        // Collect all available sectors for the filter UI
-        const sectorRows = db.prepare(
-          `SELECT DISTINCT s.sector FROM securities s ${universeJoin} WHERE s.active = 1 AND s.sector IS NOT NULL ORDER BY s.sector`
-        ).all() as {sector: string}[];
+        const requiresMembership = ['sp500', 'qqq', 'dow30', 'space', 'ai_chips', 'ai_data', 'ai_software', 'moat', 'compounders'].includes(universe);
+        let universeJoin = '';
+        if (requiresMembership) {
+           const memberCount = (db.prepare(
+            `SELECT COUNT(*) as cnt FROM universe_memberships WHERE universe = ?`
+           ).get(universe) as {cnt: number}).cnt;
+           if (memberCount > 0) {
+             universeJoin = `JOIN universe_memberships um ON um.ticker = s.ticker AND um.universe = ?`;
+           }
+        }
 
         const params: Array<string | number | null> = [];
-        if (sector) params.push(sector);
-        if (q)      params.push(`%${q}%`, `%${q}%`);
-        params.push(limit, offset);
+        const countParams: Array<string | number | null> = [];
+        
+        if (universeJoin) {
+           params.push(universe);
+           countParams.push(universe);
+        }
 
-        const peOrder = (sortRaw === 'pe' || sortRaw === 'forward_pe') ? 'ASC' : order;
+        let sectorWhere = '';
+        if (sector) {
+           sectorWhere = 'AND s.sector = ?';
+           params.push(sector);
+           countParams.push(sector);
+        } else if (isThemeTab) {
+           const sectors = themeSectorFilter[universe];
+           const placeholders = sectors.map(() => '?').join(',');
+           sectorWhere = `AND s.sector IN (${placeholders})`;
+           params.push(...sectors);
+           countParams.push(...sectors);
+        }
+
+        const searchWhere = q ? `AND (UPPER(s.ticker) LIKE ? OR UPPER(COALESCE(s.name,'')) LIKE ?)` : '';
+        if (q) {
+           params.push(`%${q}%`, `%${q}%`);
+           countParams.push(`%${q}%`, `%${q}%`);
+        }
+
+        const sectorListParams = universeJoin ? [universe] : [];
+        const sectorRows = db.prepare(
+          `SELECT DISTINCT s.sector FROM securities s ${universeJoin} WHERE s.active = 1 AND s.sector IS NOT NULL ORDER BY s.sector`
+        ).all(...sectorListParams) as {sector: string}[];
+
+        params.push(limit, offset);
 
         const sql = `
           SELECT
@@ -1386,26 +1419,23 @@ function registerApiRoutes(app: Express): void {
           WHERE s.active = 1
             ${sectorWhere}
             ${searchWhere}
-          ORDER BY ${sortExpr} ${peOrder}, s.ticker ASC
+          ORDER BY ${sortExpr} ${order}, s.ticker ASC
           LIMIT ? OFFSET ?
         `;
 
-        const rows = db.prepare(sql).all(...params) as Sp500Row[];
+        const rows = db.prepare(sql).all(...params) as ScreenerRow[];
 
         const totalCount = (db.prepare(`
           SELECT COUNT(*) as cnt FROM securities s ${universeJoin}
           LEFT JOIN fundamentals f ON f.ticker = s.ticker
-          WHERE s.active = 1 ${sectorWhere} ${q ? `AND (UPPER(s.ticker) LIKE ? OR UPPER(COALESCE(s.name,'')) LIKE ?)` : ''}
-        `).get(
-          ...( sector ? [sector] : [] ),
-          ...( q ? [`%${q}%`, `%${q}%`] : [] ),
-        ) as {cnt: number}).cnt;
+          WHERE s.active = 1 ${sectorWhere} ${searchWhere}
+        `).get(...countParams) as {cnt: number}).cnt;
 
         db.close();
 
         return res.json({
           generatedAt: new Date().toISOString(),
-          universe: useUniverse ? 'sp500' : 'all_active',
+          universe: universe,
           total: totalCount,
           limit,
           offset,
@@ -1437,8 +1467,8 @@ function registerApiRoutes(app: Express): void {
           })),
         });
       } catch (error) {
-        console.error('S&P 500 endpoint error:', error);
-        return res.status(500).json({ error: 'Failed to fetch S&P 500 data' });
+        console.error('Screener endpoint error:', error);
+        return res.status(500).json({ error: 'Failed to fetch screener data' });
       }
     },
   );

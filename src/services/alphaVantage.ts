@@ -38,6 +38,7 @@ export async function fetchAVEndpoint(ticker: string, endpoint: string): Promise
     
     if (daysOld < 30) {
       console.log(`[AV Cache] HIT for ${ticker} ${endpoint} (${daysOld.toFixed(1)} days old)`);
+      db.close();
       return JSON.parse(row.data);
     } else {
       console.log(`[AV Cache] EXPIRED for ${ticker} ${endpoint} (${daysOld.toFixed(1)} days old). Refreshing...`);
@@ -69,6 +70,8 @@ export async function fetchAVEndpoint(ticker: string, endpoint: string): Promise
   } catch (e) {
     console.error(`AV Fetch Error for ${endpoint} ${ticker}:`, e);
     return row ? JSON.parse(row.data) : null;
+  } finally {
+    db.close();
   }
 }
 

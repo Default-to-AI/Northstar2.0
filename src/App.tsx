@@ -9,10 +9,9 @@ import Watchlist from './pages/Watchlist';
 import Archive from './pages/Archive';
 import Committee from './pages/Committee';
 import Scanner from './pages/Scanner';
-import ScannerInsights from './pages/ScannerInsights';
 import EvidencePacket from './pages/EvidencePacket';
 import InsightsTicker from './pages/InsightsTicker';
-import SP500 from './pages/SP500';
+import Screener from './pages/Screener';
 import { Badge } from '@/components/ui/badge';
 import MarketIndicesHeader from './components/MarketIndicesHeader';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -44,8 +43,7 @@ function Sidebar() {
     { to: '/watchlist', icon: List, label: 'Watchlist' },
     { to: '/committee', icon: Users, label: 'Committee' },
     { to: '/scanner', icon: Sparkles, label: 'Scanner' },
-    { to: '/insights', icon: BarChart3, label: 'Insights' },
-    { to: '/sp500', icon: TrendingUp, label: 'S&P 500' },
+    { to: '/screener', icon: BarChart3, label: 'Screener' },
     { to: '/archive', icon: ArchiveIcon, label: 'Archive' },
     { to: '/profile', icon: UserCircle, label: 'Profile' },
   ];
@@ -104,11 +102,9 @@ export default function App() {
                 <Route path="/watchlist" element={<Watchlist />} />
                 <Route path="/committee" element={<Committee />} />
                 <Route path="/scanner" element={<Scanner />} />
-                <Route path="/scanner/insights" element={<ScannerInsights />} />
-                <Route path="/insights" element={<ScannerInsights />} />
+                <Route path="/screener" element={<Screener />} />
                 <Route path="/insights/:ticker" element={<InsightsTicker />} />
                 <Route path="/security/:ticker" element={<EvidencePacket />} />
-                <Route path="/sp500" element={<SP500 />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>

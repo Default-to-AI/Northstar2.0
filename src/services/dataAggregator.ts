@@ -1,10 +1,6 @@
 import YahooFinance from 'yahoo-finance2';
 import { getFmpFundamentals } from './fmp';
 import { getAlphaVantageFundamentals } from './alphaVantage';
-import { exec } from 'node:child_process';
-import util from 'node:util';
-
-const execPromise = util.promisify(exec);
 
 const parseAV = (val: any) => (val === 'None' || !val) ? null : parseFloat(val);
 
@@ -154,7 +150,7 @@ export async function fetchFinnhubMetrics(ticker: string): Promise<Record<string
 
 export async function fetchYahooQuote(ticker: string) {
   try {
-    const yf = new YahooFinance();
+    const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
     const result = await yf.quoteSummary(ticker, { 
       modules: ['price', 'summaryDetail', 'assetProfile', 'financialData', 'defaultKeyStatistics', 'earningsTrend'] 
     });
@@ -165,16 +161,44 @@ export async function fetchYahooQuote(ticker: string) {
   }
 }
 
-export async function fetchPriceHistoryYFinance(ticker: string): Promise<any[]> {
+type HistoricalPricePoint = {
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  price: number | null;
+  volume: number | null;
+};
+
+function toNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export async function fetchPriceHistoryYFinance(ticker: string): Promise<HistoricalPricePoint[]> {
   try {
-    const { stdout } = await execPromise(`python3 -m scripts.research_engine.fetch_history ${ticker}`);
-    const data = JSON.parse(stdout);
-    if (Array.isArray(data)) {
-      return data;
-    }
-    return [];
+    const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+    const period1 = new Date();
+    period1.setFullYear(period1.getFullYear() - 10);
+
+    const chart = await yf.chart(ticker, { period1: period1.toISOString().slice(0, 10), interval: '1d' });
+    const quotes = Array.isArray(chart.quotes) ? chart.quotes : [];
+
+    return quotes
+      .filter((quote) => quote?.date)
+      .map((quote) => ({
+        date: new Date(quote.date).toISOString().slice(0, 10),
+        open: toNullableNumber(quote.open),
+        high: toNullableNumber(quote.high),
+        low: toNullableNumber(quote.low),
+        close: toNullableNumber(quote.close),
+        price: toNullableNumber(quote.close),
+        volume: toNullableNumber(quote.volume),
+      }))
+      .filter((quote) => quote.price !== null)
+      .reverse();
   } catch (e) {
-    console.error("Failed to fetch price history via yfinance", e);
+    console.error('Failed to fetch price history via yahoo-finance2', e);
     return [];
   }
 }

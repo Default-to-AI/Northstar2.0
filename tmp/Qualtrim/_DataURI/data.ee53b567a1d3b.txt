@@ -1,1 +1,0 @@
-chrome-extension://aholpfdialjgjfhomihkjbmgjidlcdno/solana-provider.js

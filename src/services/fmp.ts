@@ -13,7 +13,6 @@ export async function fetchFMPEndpoint(ticker: string, endpoint: string, queryPa
   db.exec(`
     CREATE TABLE IF NOT EXISTS fmp_cache (
       ticker TEXT NOT NULL,
-      ticker TEXT,
       endpoint TEXT,
       params TEXT,
       data TEXT,
@@ -32,6 +31,7 @@ export async function fetchFMPEndpoint(ticker: string, endpoint: string, queryPa
     // If cache is less than 1 day old, return it
     if (daysOld < 1) {
       console.log(`[FMP Cache] HIT for ${ticker} ${endpoint} (${daysOld.toFixed(1)} days old)`);
+      db.close();
       return JSON.parse(row.data);
     } else {
       console.log(`[FMP Cache] EXPIRED for ${ticker} ${endpoint} (${daysOld.toFixed(1)} days old). Refreshing...`);
@@ -73,6 +73,8 @@ export async function fetchFMPEndpoint(ticker: string, endpoint: string, queryPa
   } catch (e) {
     console.error(`FMP Fetch Error for ${endpoint} ${ticker}:`, e);
     return row ? JSON.parse(row.data) : null;
+  } finally {
+    db.close();
   }
 }
 

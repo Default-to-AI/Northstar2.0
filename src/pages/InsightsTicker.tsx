@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Loader2, AlertTriangle, Search, Star, ExternalLink, X, Download, ChevronDown, Info, ArrowUp, ArrowDown } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, Cell } from 'recharts';
 
 import type {
   InsightsTickerResponse,
@@ -75,7 +75,13 @@ function formatXAxisTick(tickItem: string, configKey: string) {
   if (configKey === 'Price' && tickItem && typeof tickItem === 'string') {
     const parts = tickItem.split('-');
     if (parts.length === 3) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      return `${parts[1]}/${parts[0].slice(2)}`;
+    }
+  }
+  if (tickItem && typeof tickItem === 'string') {
+    const match = tickItem.match(/(Q[1-4])\s*(20\d{2})/);
+    if (match) {
+      return `${match[1]} '${match[2].slice(2)}`;
     }
   }
   return tickItem;
@@ -213,19 +219,57 @@ function getMetricColor(value: number | undefined | null, metricType: string, se
 function CustomTooltip({ active, payload, label }: any) {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-[#1a1b23] border border-[#2a2b36] p-3 rounded-lg shadow-2xl text-[13px] min-w-[140px] relative">
-        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-[#1a1b23] border-b border-r border-[#2a2b36] rotate-45"></div>
-        <p className="font-bold text-white mb-2">{label}</p>
-        {payload.map((p: any, i: number) => (
-          <div key={i} className="flex items-center gap-2 font-medium">
-             <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: p.color }}></div>
-             <span className="text-white">${formatLargeNumber(p.value)}</span>
-          </div>
-        ))}
+      <div className="bg-[#1a1b23] border border-[#2a2b36] p-2 rounded-lg shadow-2xl text-[12px] min-w-[120px] relative -translate-x-1/2 -translate-y-full mb-1 pointer-events-none z-50">
+        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-[#1a1b23] border-b border-r border-[#2a2b36] rotate-45"></div>
+        <p className="font-bold text-white mb-1.5">{label}</p>
+        {payload.map((p: any, i: number) => {
+          const isSplitColor = p.color === 'url(#splitStrokeMini)' || p.color === 'url(#splitStrokeExpanded)';
+          const dotColor = isSplitColor ? '#10b981' : p.color; 
+          return (
+            <div key={i} className="flex items-center gap-2 font-medium">
+               <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: dotColor }}></div>
+               <span className="text-white">${formatLargeNumber(p.value)}</span>
+            </div>
+          );
+        })}
       </div>
     );
   }
   return null;
+}
+
+function renderYearBands(data: any[], isPrice: boolean, dataKeyX: string) {
+  const bands = [];
+  let currentYear = null;
+  let currentStart = null;
+  let yearIndex = 0;
+  
+  for (let i = 0; i < data.length; i++) {
+    const item = data[i];
+    const rawDate = item[dataKeyX];
+    if (!rawDate) continue;
+    
+    let year: string | null = null;
+    if (isPrice) {
+      year = rawDate.split('-')[0];
+    } else {
+      const match = rawDate.match(/(20\d{2})/);
+      if (match) year = match[1];
+    }
+    
+    if (year !== currentYear) {
+      if (currentYear !== null && yearIndex % 2 === 0) {
+         bands.push(<ReferenceArea key={`band-${currentYear}`} x1={currentStart} x2={data[i-1][dataKeyX]} fill="rgba(255,255,255,0.02)" />);
+      }
+      currentYear = year;
+      currentStart = rawDate;
+      yearIndex++;
+    }
+  }
+  if (currentYear !== null && yearIndex % 2 === 0 && data.length > 0) {
+    bands.push(<ReferenceArea key={`band-${currentYear}`} x1={currentStart} x2={data[data.length-1][dataKeyX]} fill="rgba(255,255,255,0.02)" />);
+  }
+  return bands;
 }
 
 // Chart Configurations mapping Title to data key and style
@@ -245,21 +289,74 @@ function MiniChart({ data, configKey }: { data: any[], configKey: string }) {
   const config = CHART_CONFIGS[configKey];
   if (!config || !data || data.length === 0) return <MissingData />;
 
+  const isPrice = configKey === 'Price';
+  const startVal = data[0]?.[config.dataKey];
+  let gradientOffset = 0;
+  if (isPrice && data.length > 0) {
+    const dataMax = Math.max(...data.map(i => i[config.dataKey]));
+    const dataMin = Math.min(...data.map(i => i[config.dataKey]));
+    if (dataMax > dataMin) {
+      gradientOffset = (dataMax - startVal) / (dataMax - dataMin);
+    }
+  }
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       {config.type === 'bar' ? (
-        <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+        <BarChart data={data} margin={{ top: 15, right: 10, left: 0, bottom: 25 }}>
+          {renderYearBands(data, isPrice, configKey === 'Price' ? 'date' : 'period')}
           <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" tickFormatter={(val) => formatXAxisTick(val, configKey)} />
           <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
-          <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
-          <Bar dataKey={config.dataKey} fill={config.color} radius={[2, 2, 0, 0]} />
+          <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} offset={0} />
+          <Bar dataKey={config.dataKey} radius={[2, 2, 0, 0]}>
+            {data.map((entry, index) => {
+              const opacity = 0.3 + (0.7 * (index / Math.max(1, data.length - 1)));
+              return <Cell key={`cell-${index}`} fill={config.color} fillOpacity={opacity} />;
+            })}
+          </Bar>
         </BarChart>
       ) : (
-        <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
+        <AreaChart data={data} margin={{ top: 15, right: 10, left: 0, bottom: 25 }}>
+          {renderYearBands(data, isPrice, configKey === 'Price' ? 'date' : 'period')}
+          <defs>
+            {isPrice ? (
+              <>
+                <linearGradient id="splitColorMini" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stopColor="#10b981" stopOpacity={0.5} />
+                  <stop offset={gradientOffset} stopColor="#10b981" stopOpacity={0.1} />
+                  <stop offset={gradientOffset} stopColor="#ef4444" stopOpacity={0.1} />
+                  <stop offset="1" stopColor="#ef4444" stopOpacity={0.5} />
+                </linearGradient>
+                <linearGradient id="splitStrokeMini" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset={gradientOffset} stopColor="#10b981" stopOpacity={1} />
+                  <stop offset={gradientOffset} stopColor="#ef4444" stopOpacity={1} />
+                </linearGradient>
+              </>
+            ) : (
+              <>
+                <linearGradient id={`gradient-area-${configKey.replace(/\s+/g, '')}`} x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor={config.color} stopOpacity={0.05} />
+                  <stop offset="100%" stopColor={config.color} stopOpacity={config.fillOpacity || 0.5} />
+                </linearGradient>
+                <linearGradient id={`gradient-stroke-${configKey.replace(/\s+/g, '')}`} x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor={config.color} stopOpacity={0.2} />
+                  <stop offset="100%" stopColor={config.color} stopOpacity={1} />
+                </linearGradient>
+              </>
+            )}
+          </defs>
           <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={9} tickMargin={5} minTickGap={15} angle={-45} textAnchor="end" tickFormatter={(val) => formatXAxisTick(val, configKey)} />
           <YAxis stroke="#52525b" fontSize={9} tickFormatter={formatYAxisTick} width={45} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
-          <Tooltip content={<CustomTooltip />} />
-          <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
+          {isPrice && <ReferenceLine y={startVal} stroke="#52525b" strokeDasharray="3 3" />}
+          <Tooltip content={<CustomTooltip />} offset={0} />
+          <Area 
+            type="monotone" 
+            dataKey={config.dataKey} 
+            stroke={isPrice ? "url(#splitStrokeMini)" : `url(#gradient-stroke-${configKey.replace(/\s+/g, '')})`} 
+            fill={isPrice ? "url(#splitColorMini)" : `url(#gradient-area-${configKey.replace(/\s+/g, '')})`} 
+            fillOpacity={isPrice ? 1 : config.fillOpacity} 
+            strokeWidth={2} 
+          />
         </AreaChart>
       )}
     </ResponsiveContainer>
@@ -272,6 +369,17 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
 
   const currentVal = fullData[fullData.length - 1]?.[config.dataKey];
   
+  const isPrice = configKey === 'Price';
+  const startVal = data[0]?.[config.dataKey];
+  let gradientOffset = 0;
+  if (isPrice && data.length > 0) {
+    const dataMax = Math.max(...data.map(i => i[config.dataKey]));
+    const dataMin = Math.min(...data.map(i => i[config.dataKey]));
+    if (dataMax > dataMin) {
+      gradientOffset = (dataMax - startVal) / (dataMax - dataMin);
+    }
+  }
+
   const calculateGrowth = (years: number) => {
     const offset = configKey === 'Price' ? years * 252 : (isAnnual ? years : years * 4);
     if (fullData.length < offset * 0.9) return null;
@@ -290,18 +398,60 @@ function ExpandedChart({ data, fullData, configKey, isAnnual }: { data: any[], f
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           {config.type === 'bar' ? (
-            <BarChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <BarChart data={data} margin={{ top: 25, right: 30, left: 20, bottom: 20 }}>
+              {renderYearBands(data, isPrice, configKey === 'Price' ? 'date' : 'period')}
               <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} tickFormatter={(val) => formatXAxisTick(val, configKey)} />
               <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
-              <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} />
-              <Bar dataKey={config.dataKey} fill={config.color} radius={[4, 4, 0, 0]} />
+              <Tooltip content={<CustomTooltip />} cursor={{fill: 'rgba(255,255,255,0.05)'}} offset={0} />
+              <Bar dataKey={config.dataKey} radius={[4, 4, 0, 0]}>
+                {data.map((entry, index) => {
+                  const opacity = 0.3 + (0.7 * (index / Math.max(1, data.length - 1)));
+                  return <Cell key={`cell-${index}`} fill={config.color} fillOpacity={opacity} />;
+                })}
+              </Bar>
             </BarChart>
           ) : (
-            <AreaChart data={data} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+            <AreaChart data={data} margin={{ top: 25, right: 30, left: 20, bottom: 20 }}>
+              {renderYearBands(data, isPrice, configKey === 'Price' ? 'date' : 'period')}
+              <defs>
+                {isPrice ? (
+                  <>
+                    <linearGradient id="splitColorExpanded" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stopColor="#10b981" stopOpacity={0.4} />
+                      <stop offset={gradientOffset} stopColor="#10b981" stopOpacity={0.05} />
+                      <stop offset={gradientOffset} stopColor="#ef4444" stopOpacity={0.05} />
+                      <stop offset="1" stopColor="#ef4444" stopOpacity={0.4} />
+                    </linearGradient>
+                    <linearGradient id="splitStrokeExpanded" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset={gradientOffset} stopColor="#10b981" stopOpacity={1} />
+                      <stop offset={gradientOffset} stopColor="#ef4444" stopOpacity={1} />
+                    </linearGradient>
+                  </>
+                ) : (
+                  <>
+                    <linearGradient id={`gradient-area-expanded-${configKey.replace(/\s+/g, '')}`} x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={config.color} stopOpacity={0.05} />
+                      <stop offset="100%" stopColor={config.color} stopOpacity={config.fillOpacity || 0.5} />
+                    </linearGradient>
+                    <linearGradient id={`gradient-stroke-expanded-${configKey.replace(/\s+/g, '')}`} x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor={config.color} stopOpacity={0.2} />
+                      <stop offset="100%" stopColor={config.color} stopOpacity={1} />
+                    </linearGradient>
+                  </>
+                )}
+              </defs>
               <XAxis dataKey={configKey === 'Price' ? 'date' : 'period'} stroke="#52525b" fontSize={11} tickMargin={10} minTickGap={30} tickFormatter={(val) => formatXAxisTick(val, configKey)} />
               <YAxis stroke="#52525b" fontSize={11} tickFormatter={formatYAxisTick} domain={configKey === 'Price' ? ['auto', 'auto'] : undefined} />
-              <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey={config.dataKey} stroke={config.color} fill={config.color} fillOpacity={config.fillOpacity} strokeWidth={2} />
+              {isPrice && <ReferenceLine y={startVal} stroke="#52525b" strokeDasharray="4 4" />}
+              <Tooltip content={<CustomTooltip />} offset={0} />
+              <Area 
+                type="monotone" 
+                dataKey={config.dataKey} 
+                stroke={isPrice ? "url(#splitStrokeExpanded)" : `url(#gradient-stroke-expanded-${configKey.replace(/\s+/g, '')})`} 
+                fill={isPrice ? "url(#splitColorExpanded)" : `url(#gradient-area-expanded-${configKey.replace(/\s+/g, '')})`} 
+                fillOpacity={isPrice ? 1 : config.fillOpacity} 
+                strokeWidth={2} 
+              />
             </AreaChart>
           )}
         </ResponsiveContainer>
@@ -324,9 +474,9 @@ export default function InsightsTicker() {
   const { ticker = '' } = useParams<{ ticker: string }>();
   const normalizedTicker = useMemo(() => ticker.trim().toUpperCase(), [ticker]);
   const queryClient = useQueryClient();
-  const [timeframe, setTimeframe] = useState<'Quarterly' | 'TTM' | 'Annually'>('Quarterly');
+  const [timeframe, setTimeframe] = useState<'1Y' | '3Y' | '5Y'>('5Y');
   const [selectedChart, setSelectedChart] = useState<string | null>(null);
-  const [expandedTimeframe, setExpandedTimeframe] = useState<'1 Week' | '1 Month' | '3 Months' | '6 Months' | 'YTD' | '1 Year' | '3 Years' | '5 Years' | '10 Years' | 'All'>('5 Years');
+  const [expandedTimeframe, setExpandedTimeframe] = useState<'3M' | '6M' | 'YTD' | '1Y' | '3Y' | '5Y' | '10Y'>('5Y');
   const [isPatching, setIsPatching] = useState(false);
 
   // --- Data Fetching ---
@@ -395,8 +545,8 @@ export default function InsightsTicker() {
   }, [agg?.pricing?.historical]);
 
   const currentChartData = useMemo(() => {
-    return timeframe === 'Annually' ? (agg?.charts?.annual || []) : (agg?.charts?.quarterly || []);
-  }, [timeframe, agg?.charts]);
+    return agg?.charts?.quarterly || [];
+  }, [agg?.charts]);
 
   const chartDataToRender = useMemo(() => {
     if (!selectedChart) return [];
@@ -409,27 +559,23 @@ export default function InsightsTicker() {
         const ytdIndex = targetData.findIndex((d: any) => d.date && d.date.startsWith(currentYear));
         sliceAmount = ytdIndex !== -1 ? targetData.length - ytdIndex : 252;
       } else {
-        sliceAmount = timeframe === 'Annually' ? 1 : 4;
+        sliceAmount = 4;
       }
-    } else if (expandedTimeframe === '1 Week') {
-      sliceAmount = isPrice ? 5 : 1;
-    } else if (expandedTimeframe === '1 Month') {
-      sliceAmount = isPrice ? 21 : 1;
-    } else if (expandedTimeframe === '3 Months') {
-      sliceAmount = isPrice ? 63 : (timeframe === 'Annually' ? 1 : 1);
-    } else if (expandedTimeframe === '6 Months') {
-      sliceAmount = isPrice ? 126 : (timeframe === 'Annually' ? 1 : 2);
-    } else if (expandedTimeframe === '1 Year') {
-      sliceAmount = isPrice ? 252 : (timeframe === 'Annually' ? 1 : 4);
-    } else if (expandedTimeframe === '3 Years') {
-      sliceAmount = isPrice ? 756 : (timeframe === 'Annually' ? 3 : 12);
-    } else if (expandedTimeframe === '5 Years') {
-      sliceAmount = isPrice ? 1260 : (timeframe === 'Annually' ? 5 : 20);
-    } else if (expandedTimeframe === '10 Years') {
-      sliceAmount = isPrice ? 2520 : (timeframe === 'Annually' ? 10 : 40);
+    } else if (expandedTimeframe === '3M') {
+      sliceAmount = isPrice ? 63 : 1;
+    } else if (expandedTimeframe === '6M') {
+      sliceAmount = isPrice ? 126 : 2;
+    } else if (expandedTimeframe === '1Y') {
+      sliceAmount = isPrice ? 252 : 4;
+    } else if (expandedTimeframe === '3Y') {
+      sliceAmount = isPrice ? 756 : 12;
+    } else if (expandedTimeframe === '5Y') {
+      sliceAmount = isPrice ? 1260 : 20;
+    } else if (expandedTimeframe === '10Y') {
+      sliceAmount = isPrice ? 2520 : 40;
     }
     return sliceAmount > 0 ? targetData.slice(-sliceAmount) : targetData;
-  }, [selectedChart, historicalData, currentChartData, expandedTimeframe, timeframe]);
+  }, [selectedChart, historicalData, currentChartData, expandedTimeframe]);
 
   const chartPercentChange = useMemo(() => {
     if (!selectedChart || chartDataToRender.length < 2) return null;
@@ -481,15 +627,19 @@ export default function InsightsTicker() {
                 </div>
               </div>
               
-              <div className="absolute left-1/2 -translate-x-1/2 top-0 flex items-center border border-[#2a2b36] rounded overflow-hidden">
-                {['1 Week', '1 Month', '3 Months', '6 Months', 'YTD', '1 Year', '5 Years', '10 Years', 'All'].map(tf => (
-                  <button 
-                    key={tf}
-                    onClick={() => setExpandedTimeframe(tf as any)}
-                    className={`px-3 py-1.5 text-xs font-medium transition-colors border-r border-[#2a2b36] last:border-r-0 ${expandedTimeframe === tf ? 'bg-[#0ea5e9]/20 text-[#0ea5e9]' : 'bg-[#0f1015] text-muted-foreground hover:bg-[#1a1b23] hover:text-white'}`}
-                  >
-                    {tf}
-                  </button>
+              <div className="absolute left-1/2 -translate-x-1/2 top-0 flex items-center gap-2">
+                {(selectedChart === 'Price' ? [['3M', '6M'], ['YTD'], ['1Y', '3Y', '5Y', '10Y']] : [['1Y', '3Y', '5Y']]).map((group, idx) => (
+                  <div key={idx} className="flex items-center border border-[#2a2b36] rounded overflow-hidden">
+                    {group.map(tf => (
+                      <button 
+                        key={tf}
+                        onClick={() => setExpandedTimeframe(tf as any)}
+                        className={`px-4 py-1.5 text-xs font-medium transition-colors border-r border-[#2a2b36] last:border-r-0 ${expandedTimeframe === tf ? 'bg-[#0ea5e9]/20 text-[#0ea5e9]' : 'bg-[#0f1015] text-muted-foreground hover:bg-[#1a1b23] hover:text-white'}`}
+                      >
+                        {tf}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
 
@@ -504,7 +654,7 @@ export default function InsightsTicker() {
                    data={chartDataToRender} 
                    fullData={selectedChart === 'Price' ? historicalData : currentChartData}
                    configKey={selectedChart} 
-                   isAnnual={timeframe === 'Annually'} 
+                   isAnnual={false} 
                  />
                ) : (
                  <div className="flex items-center justify-center h-full flex-col gap-4">
@@ -779,14 +929,14 @@ export default function InsightsTicker() {
       <div className="space-y-4">
         <div className="flex justify-center mb-6">
           <div className="bg-[#1a1b23] border border-[#2a2b36] rounded-lg p-1 flex gap-1">
-            {['Quarterly', 'Quarterly (TTM)', 'Annually'].map(tf => {
-              const val = tf === 'Quarterly (TTM)' ? 'TTM' : tf as any;
+            {['1Y', '3Y', '5Y'].map(tf => {
+              const val = tf as any;
               return (
                 <button 
                   key={tf}
                   onClick={() => setTimeframe(val)}
                   className={cn(
-                    "px-4 py-1.5 text-[12px] font-medium rounded-md transition-colors",
+                    "px-6 py-1.5 text-[12px] font-medium rounded-md transition-colors",
                     timeframe === val ? "bg-sky-500/20 text-sky-400" : "text-muted-foreground hover:text-white"
                   )}
                 >
@@ -799,12 +949,20 @@ export default function InsightsTicker() {
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {['Price', 'Revenue', 'EBITDA', 'Net Income', 'Free Cash Flow', 'EPS', 'Shares Outstanding', 'Cash & Debt', 'Return Of Capital'].map((title) => {
-            const dataArr = title === 'Price' ? historicalData : currentChartData;
+            const isPrice = title === 'Price';
+            const dataArr = isPrice ? historicalData : currentChartData;
+            
+            let sliceAmount = 0;
+            if (timeframe === '1Y') sliceAmount = isPrice ? 252 : 4;
+            else if (timeframe === '3Y') sliceAmount = isPrice ? 756 : 12;
+            else if (timeframe === '5Y') sliceAmount = isPrice ? 1260 : 20;
+
+            const renderData = sliceAmount > 0 ? dataArr.slice(-sliceAmount) : dataArr;
             const config = CHART_CONFIGS[title];
             let pctChange: number | null = null;
-            if (dataArr && dataArr.length >= 2 && config) {
-              const first = dataArr[0]?.[config.dataKey];
-              const last = dataArr[dataArr.length - 1]?.[config.dataKey];
+            if (renderData && renderData.length >= 2 && config) {
+              const first = renderData[0]?.[config.dataKey];
+              const last = renderData[renderData.length - 1]?.[config.dataKey];
               if (first && last && first !== 0) {
                 pctChange = ((last - first) / first) * 100;
               }
@@ -838,7 +996,7 @@ export default function InsightsTicker() {
               </div>
               <div className="flex-1 overflow-hidden mt-auto rounded relative">
                 {CHART_CONFIGS[title] ? (
-                  <MiniChart data={title === 'Price' ? historicalData : currentChartData} configKey={title} />
+                  <MiniChart data={renderData} configKey={title} />
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center bg-[#0f1015]/50 border border-[#2a2b36]/50">
                     <MissingData />

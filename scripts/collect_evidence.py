@@ -75,7 +75,7 @@ def collect_evidence(ticker: str) -> None:
     info = stock.info
     if not info or "symbol" not in info:
         print(f"Failed to fetch data for {normalized_ticker}")
-        sys.exit(1)
+        raise ValueError(f"Failed to fetch data for {normalized_ticker}")
 
     total_revenue = _finite_or_none(info.get("totalRevenue"))
     free_cashflow = _finite_or_none(info.get("freeCashflow"))
