@@ -438,7 +438,7 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+      <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-1 xl:col-span-1">
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="label-text">Daily decisions</h2>
@@ -484,7 +484,7 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+      <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-1 xl:col-span-1">
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="label-text">Portfolio health</h2>
@@ -529,7 +529,7 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+      <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-3 xl:col-span-3">
         <CardContent className="p-4 space-y-3">
           <h2 className="label-text">High-confidence research alerts</h2>
           {alertsQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading alerts…</p>}
@@ -563,5 +563,6 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
     </div>
+  </div>
   );
 }
