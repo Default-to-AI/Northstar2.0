@@ -421,6 +421,62 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
 
+      <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-2 xl:col-span-2">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="label-text">Pre-market movers</h2>
+            {premarketMoversQuery.data && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                updated: {new Date(premarketMoversQuery.data.asOf).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}
+              </span>
+            )}
+          </div>
+          {premarketMoversQuery.isLoading && (
+            <p className="text-sm font-mono text-muted-foreground">Loading pre-market movers…</p>
+          )}
+          {premarketMoversQuery.isError && (
+            <p className="text-sm font-mono text-negative">Failed to load pre-market movers.</p>
+          )}
+          {!premarketMoversQuery.isLoading && !premarketMoversQuery.isError && (premarketMoversQuery.data?.movers.length ?? 0) === 0 && (
+            <p className="text-sm font-mono text-muted-foreground">No significant pre-market movers.</p>
+          )}
+          <div className="space-y-2 max-h-[300px] overflow-y-auto">
+            {(premarketMoversQuery.data?.movers ?? []).slice(0, 15).map((mover, index) => (
+              <div key={`${mover.ticker}-${index}`} className="border border-border p-2 bg-background/40">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono flex-shrink-0">
+                      {mover.ticker}
+                    </Badge>
+                    {mover.name && (
+                      <span className="text-xs font-mono text-muted-foreground truncate max-w-[120px]">{mover.name}</span>
+                    )}
+                    {mover.sector && (
+                      <Badge variant="outline" className="rounded-none uppercase text-[9px] font-mono text-muted-foreground flex-shrink-0">
+                        {mover.sector}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] font-mono">
+                    <span className={ (mover.gapPct ?? 0) >= 0 ? 'text-positive' : 'text-negative' }>
+                      { (mover.gapPct ?? 0) >= 0 ? '+' : '' }{mover.gapPct?.toFixed(2)}%
+                    </span>
+                    <span className="text-muted-foreground">
+                      ${mover.lastClose.toFixed(2)} → ${mover.preMarketPrice?.toFixed(2) ?? 'n/a'}
+                    </span>
+                    {mover.relVolume !== null && mover.relVolume > 0 && (
+                      <Badge variant="outline" className="rounded-none uppercase text-[9px] font-mono">
+                        {mover.relVolume.toFixed(1)}x vol
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-1 xl:col-span-1">
         <CardContent className="p-4 space-y-3">
           <h2 className="label-text">Upcoming events</h2>
