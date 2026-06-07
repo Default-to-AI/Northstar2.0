@@ -373,6 +373,93 @@ function registerApiRoutes(app: Express): void {
   registerOutcomeRoutes(app, openResearchDb);
   registerPortfolioHealthRoutes(app, openResearchDb);
 
+  // --- Pre-market movers / gap scanner ---
+  app.get('/api/research/premarket-movers', async (req: Request, res: Response) => {
+    let db: ReturnType<typeof openResearchDb> | null = null;
+    try {
+      db = openResearchDb();
+      // Get active universe tickers (limit to 200 for API performance)
+      const rows = db
+        .prepare(`SELECT ticker, name, sector FROM securities WHERE is_active = 1 LIMIT 200`)
+        .all() as {ticker: string; name: string | null; sector: string | null}[];
+
+      if (rows.length === 0) {
+        return res.json({movers: [], asOf: new Date().toISOString()});
+      }
+
+      // Dynamic import yfinance (available in Node via yahoo-finance2)
+      const YahooFinance = (await import('yahoo-finance2')).default;
+
+      const movers: Array<{
+        ticker: string;
+        name: string | null;
+        sector: string | null;
+        lastClose: number;
+        preMarketPrice: number | null;
+        gapPct: number | null;
+        preMarketVolume: number | null;
+        avgVolume: number | null;
+        relVolume: number | null;
+      }> = [];
+
+      // Process in batches to avoid rate limits
+      const BATCH_SIZE = 25;
+      for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+        const batch = rows.slice(i, i + BATCH_SIZE);
+        await Promise.all(
+          batch.map(async (sec) => {
+            try {
+              const quote = await YahooFinance.quote(sec.ticker, {modules: ['price', 'summaryDetail']});
+              const price = quote.price;
+              const summary = quote.summaryDetail;
+
+              if (!price?.regularMarketPrice || !price?.preMarketPrice) return;
+
+              const lastClose = price.regularMarketPrice;
+              const preMarketPrice = price.preMarketPrice;
+              const gapPct = ((preMarketPrice - lastClose) / lastClose) * 100;
+
+              const preMarketVolume = price.preMarketVolume ?? 0;
+              const avgVolume = summary?.averageDailyVolume10Day ?? price.averageDailyVolume10Day ?? 0;
+              const relVolume = avgVolume > 0 ? preMarketVolume / avgVolume : 0;
+
+              // Only include meaningful gaps (|gap| > 0.5%) or high rel volume
+              if (Math.abs(gapPct) > 0.5 || relVolume > 1.5) {
+                movers.push({
+                  ticker: sec.ticker,
+                  name: sec.name,
+                  sector: sec.sector,
+                  lastClose,
+                  preMarketPrice,
+                  gapPct: Math.round(gapPct * 100) / 100,
+                  preMarketVolume,
+                  avgVolume,
+                  relVolume: Math.round(relVolume * 100) / 100,
+                });
+              }
+            } catch {
+              // Skip failed tickers silently
+            }
+          })
+        );
+      }
+
+      // Sort: biggest absolute gap first, then by rel volume
+      movers.sort((a, b) => {
+        const gapDiff = Math.abs(b.gapPct ?? 0) - Math.abs(a.gapPct ?? 0);
+        if (Math.abs(gapDiff) > 0.01) return gapDiff;
+        return (b.relVolume ?? 0) - (a.relVolume ?? 0);
+      });
+
+      return res.json({movers: movers.slice(0, 50), asOf: new Date().toISOString()});
+    } catch (error: unknown) {
+      console.error('GET /premarket-movers error:', error);
+      return res.status(500).json({error: 'Failed to fetch pre-market movers'});
+    } finally {
+      db?.close();
+    }
+  });
+
   app.post('/api/research/evidence/freeze', (req: Request<Record<string, never>, unknown, FreezeEvidenceRequest>, res: Response) => {
     const ticker = req.body?.ticker?.trim().toUpperCase();
     if (!ticker) {

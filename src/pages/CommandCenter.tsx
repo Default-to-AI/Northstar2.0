@@ -90,6 +90,23 @@ type PortfolioHealthResponse = {
   checks: HealthCheckRecord[];
 };
 
+type PremarketMover = {
+  ticker: string;
+  name: string | null;
+  sector: string | null;
+  lastClose: number;
+  preMarketPrice: number | null;
+  gapPct: number | null;
+  preMarketVolume: number | null;
+  avgVolume: number | null;
+  relVolume: number | null;
+};
+
+type PremarketMoversResponse = {
+  movers: PremarketMover[];
+  asOf: string;
+};
+
 function alertLabel(type: AlertType): string {
   switch (type) {
     case 'pipeline_failure':
@@ -235,6 +252,16 @@ export default function CommandCenter() {
       return (await response.json()) as PortfolioHealthResponse;
     },
     refetchInterval: 60_000,
+  });
+
+  const premarketMoversQuery = useQuery({
+    queryKey: ['research-premarket-movers'],
+    queryFn: async () => {
+      const response = await fetch('/api/research/premarket-movers');
+      if (!response.ok) throw new Error('Failed to load pre-market movers');
+      return (await response.json()) as PremarketMoversResponse;
+    },
+    refetchInterval: 30_000,
   });
 
   const refreshBriefingMutation = useMutation({
