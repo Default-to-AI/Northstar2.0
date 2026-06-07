@@ -9,7 +9,6 @@ import Watchlist from './pages/Watchlist';
 import Archive from './pages/Archive';
 import Committee from './pages/Committee';
 import Scanner from './pages/Scanner';
-import EvidencePacket from './pages/EvidencePacket';
 import InsightsTicker from './pages/InsightsTicker';
 import Screener from './pages/Screener';
 import { Badge } from '@/components/ui/badge';
@@ -104,7 +103,6 @@ export default function App() {
                 <Route path="/scanner" element={<Scanner />} />
                 <Route path="/screener" element={<Screener />} />
                 <Route path="/insights/:ticker" element={<InsightsTicker />} />
-                <Route path="/security/:ticker" element={<EvidencePacket />} />
                 <Route path="/archive" element={<Archive />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>
