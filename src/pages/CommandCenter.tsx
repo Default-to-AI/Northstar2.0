@@ -284,10 +284,22 @@ export default function CommandCenter() {
     : null;
 
   return (
-    <div className="p-4 space-y-4 max-w-[1200px] mx-auto">
-      <h1 className="text-sm font-mono tracking-[0.2em] uppercase text-primary">Command Center</h1>
+    <div className="p-4 space-y-4 max-w-full mx-auto">
+      <div className="flex items-center justify-between gap-4 mb-4">
+        <h1 className="text-sm font-mono tracking-[0.2em] uppercase text-primary">Command Center</h1>
+        <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-positive animate-pulse" />
+            LIVE
+          </span>
+          <span className="px-2 py-0.5 bg-muted rounded border border-border">
+            {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+        <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-2 xl:col-span-2">
         <CardContent className="p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <h2 className="label-text">Morning briefing</h2>
@@ -382,7 +394,7 @@ export default function CommandCenter() {
         </CardContent>
       </Card>
 
-      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+      <Card className="rounded-none bg-card border-border terminal-border overflow-hidden col-span-1 lg:col-span-1 xl:col-span-1">
         <CardContent className="p-4 space-y-3">
           <h2 className="label-text">Upcoming events</h2>
           {eventsQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading events…</p>}
