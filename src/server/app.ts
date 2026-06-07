@@ -21,8 +21,10 @@ import {registerCommitteeRoutes} from './research/committee.ts';
 import {registerArchiveRoutes} from './research/archive.ts';
 import {registerAlertRoutes} from './research/alerts.ts';
 import {registerBriefingRoutes} from './research/briefing.ts';
+import {registerDecisionRoutes} from './research/decisions.ts';
 import {registerEventsRoutes} from './research/events.ts';
 import {registerOutcomeRoutes} from './research/outcomes.ts';
+import {registerPortfolioHealthRoutes} from './research/portfolioHealth.ts';
 import {freezeEvidencePacket, getFrozenEvidencePacket} from './research/evidence.ts';
 import {
   buildTickerRefreshCooldownErrorPayload,
@@ -366,8 +368,10 @@ function registerApiRoutes(app: Express): void {
   registerArchiveRoutes(app, openResearchDb);
   registerAlertRoutes(app, openResearchDb);
   registerBriefingRoutes(app, openResearchDb);
+  registerDecisionRoutes(app, openResearchDb);
   registerEventsRoutes(app, openResearchDb);
   registerOutcomeRoutes(app, openResearchDb);
+  registerPortfolioHealthRoutes(app, openResearchDb);
 
   app.post('/api/research/evidence/freeze', (req: Request<Record<string, never>, unknown, FreezeEvidenceRequest>, res: Response) => {
     const ticker = req.body?.ticker?.trim().toUpperCase();

@@ -50,6 +50,46 @@ type EventsResponse = {
   }>;
 };
 
+type DecisionType = 'long_candidate' | 'watch' | 'ignore';
+
+type DecisionRecord = {
+  ticker: string;
+  decisionType: DecisionType;
+  primaryPersona: string;
+  compounderScore: number;
+  tacticalScore: number;
+  thresholdMet: boolean;
+  rationale: string[];
+  evidence: {
+    topPersonaScore: number;
+    actionabilityState: string;
+    personaCount: number;
+  };
+  createdAt: string;
+};
+
+type DecisionsResponse = {
+  generatedAt: string;
+  decisions: DecisionRecord[];
+};
+
+type HealthCheckType = 'trim' | 'stop_loss' | 'restructure' | 'position_sizing' | 'sector_concentration';
+
+type HealthCheckRecord = {
+  ticker: string;
+  checkType: HealthCheckType;
+  triggered: boolean;
+  currentValue: number;
+  thresholdValue: number;
+  rationale: Record<string, unknown>;
+  createdAt: string;
+};
+
+type PortfolioHealthResponse = {
+  generatedAt: string;
+  checks: HealthCheckRecord[];
+};
+
 function alertLabel(type: AlertType): string {
   switch (type) {
     case 'pipeline_failure':
@@ -103,6 +143,33 @@ function eventTypeLabel(type: string): string {
   return type;
 }
 
+function decisionTypeLabel(type: DecisionType): string {
+  if (type === 'long_candidate') return 'Long Candidate';
+  if (type === 'watch') return 'Watch';
+  return 'Ignore';
+}
+
+function decisionTypeVariant(type: DecisionType): 'default' | 'outline' | 'destructive' | 'secondary' {
+  if (type === 'long_candidate') return 'default';
+  if (type === 'watch') return 'secondary';
+  return 'outline';
+}
+
+function healthCheckTypeLabel(type: HealthCheckType): string {
+  const map: Record<HealthCheckType, string> = {
+    trim: 'Trim',
+    stop_loss: 'Stop Loss',
+    restructure: 'Restructure',
+    position_sizing: 'Position Sizing',
+    sector_concentration: 'Sector Concentration',
+  };
+  return map[type] ?? type;
+}
+
+function healthCheckVariant(triggered: boolean): 'default' | 'outline' | 'destructive' | 'secondary' {
+  return triggered ? 'destructive' : 'outline';
+}
+
 function dateHeading(dateIso: string): string {
   const date = new Date(`${dateIso}T00:00:00`);
   const today = new Date();
@@ -146,6 +213,26 @@ export default function CommandCenter() {
       const response = await fetch('/api/research/events');
       if (!response.ok) throw new Error('Failed to load events');
       return (await response.json()) as EventsResponse;
+    },
+    refetchInterval: 60_000,
+  });
+
+  const decisionsQuery = useQuery({
+    queryKey: ['research-decisions'],
+    queryFn: async () => {
+      const response = await fetch('/api/research/decisions');
+      if (!response.ok) throw new Error('Failed to load decisions');
+      return (await response.json()) as DecisionsResponse;
+    },
+    refetchInterval: 60_000,
+  });
+
+  const portfolioHealthQuery = useQuery({
+    queryKey: ['research-portfolio-health'],
+    queryFn: async () => {
+      const response = await fetch('/api/research/portfolio-health');
+      if (!response.ok) throw new Error('Failed to load portfolio health');
+      return (await response.json()) as PortfolioHealthResponse;
     },
     refetchInterval: 60_000,
   });
@@ -333,6 +420,97 @@ export default function CommandCenter() {
                     </div>
                   ))}
                 </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="label-text">Daily decisions</h2>
+            {decisionsQuery.data && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                generated: {decisionsQuery.data.generatedAt}
+              </span>
+            )}
+          </div>
+          {decisionsQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading decisions…</p>}
+          {decisionsQuery.isError && <p className="text-sm font-mono text-negative">Failed to load decisions.</p>}
+          {!decisionsQuery.isLoading && !decisionsQuery.isError && (decisionsQuery.data?.decisions.length ?? 0) === 0 && (
+            <p className="text-sm font-mono text-muted-foreground">No decisions generated.</p>
+          )}
+
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {(decisionsQuery.data?.decisions ?? []).map((decision, index) => (
+              <div key={`${decision.ticker}-${decision.decisionType}-${index}`} className="border border-border p-3 bg-background/40">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={decisionTypeVariant(decision.decisionType)} className="rounded-none uppercase text-[10px] font-mono">
+                      {decisionTypeLabel(decision.decisionType)}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                      {decision.ticker}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                      {decision.primaryPersona}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                    <span>C: {decision.compounderScore}</span>
+                    <span>T: {decision.tacticalScore}</span>
+                    <span>Persona: {decision.evidence.topPersonaScore.toFixed(1)}</span>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs font-mono text-muted-foreground">
+                  {decision.rationale[0] ?? 'No rationale'}
+                </p>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-none bg-[#0d0d14] border-border terminal-border overflow-hidden">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="label-text">Portfolio health</h2>
+            {portfolioHealthQuery.data && (
+              <span className="text-[10px] font-mono text-muted-foreground">
+                generated: {portfolioHealthQuery.data.generatedAt}
+              </span>
+            )}
+          </div>
+          {portfolioHealthQuery.isLoading && <p className="text-sm font-mono text-muted-foreground">Loading portfolio health…</p>}
+          {portfolioHealthQuery.isError && <p className="text-sm font-mono text-negative">Failed to load portfolio health.</p>}
+          {!portfolioHealthQuery.isLoading && !portfolioHealthQuery.isError && (portfolioHealthQuery.data?.checks.length ?? 0) === 0 && (
+            <p className="text-sm font-mono text-muted-foreground">No portfolio health checks.</p>
+          )}
+
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {(portfolioHealthQuery.data?.checks ?? []).map((check, index) => (
+              <div key={`${check.ticker}-${check.checkType}-${index}`} className="border border-border p-3 bg-background/40">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={healthCheckVariant(check.triggered)} className="rounded-none uppercase text-[10px] font-mono">
+                      {healthCheckTypeLabel(check.checkType)}
+                    </Badge>
+                    <Badge variant="outline" className="rounded-none uppercase text-[10px] font-mono">
+                      {check.ticker}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-mono text-muted-foreground">
+                    <span className={check.triggered ? 'text-negative' : 'text-muted-foreground'}>
+                      {check.triggered ? '⚠ TRIGGERED' : 'OK'}
+                    </span>
+                    <span>Val: {check.currentValue.toFixed(2)}</span>
+                    <span>Thresh: {check.thresholdValue.toFixed(2)}</span>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs font-mono text-muted-foreground">
+                  {JSON.stringify(check.rationale)}
+                </p>
               </div>
             ))}
           </div>

@@ -1,0 +1,81 @@
+{
+  "version": "v1",
+  "description": "Deterministic portfolio governance thresholds for trim, stop-loss, restructure, position sizing, and sector concentration checks.",
+  "checks": [
+    {
+      "id": "trim",
+      "name": "Trim Oversized Winners",
+      "description": "Positions exceeding max single-name weight should be trimmed back to target.",
+      "trigger_rule": "position_pct > max_position_pct",
+      "parameters": {
+        "max_position_pct": 0.15,
+        "target_position_pct": 0.10,
+        "min_trade_value": 1000
+      },
+      "severity": "action"
+    },
+    {
+      "id": "stop_loss",
+      "name": "Stop-Loss Review",
+      "description": "Holdings down more than threshold from entry or recent high trigger a mandatory review (not auto-sell).",
+      "trigger_rule": "drawdown_pct > stop_loss_threshold OR (current_price < entry_price * (1 - trailing_stop))",
+      "parameters": {
+        "stop_loss_threshold": 0.20,
+        "trailing_stop": 0.15,
+        "lookback_days": 252,
+        "require_catalyst_break": false
+      },
+      "severity": "review"
+    },
+    {
+      "id": "restructure",
+      "name": "Restructure / Thesis Drift",
+      "description": "Fundamental thesis breakdown - moat erosion, management change, secular shift, or capital allocation failure.",
+      "trigger_rule": "score_degradation > threshold OR qualitative_flag_raised",
+      "parameters": {
+        "compounder_score_drop": 15,
+        "tactical_score_drop": 20,
+        "consecutive_quarters_fundamental_miss": 2,
+        "qualitative_flags": ["moat_erosion", "capital_allocation_shift", "management_credibility", "secular_headwind"]
+      },
+      "severity": "review"
+    },
+    {
+      "id": "position_sizing",
+      "name": "Position Sizing Discipline",
+      "description": "New entries must respect conviction-tier sizing; no position below min or above max for its tier.",
+      "trigger_rule": "new_entry_size NOT IN [min_tier_pct, max_tier_pct]",
+      "parameters": {
+        "tiers": {
+          "core": {"min_pct": 0.05, "max_pct": 0.12},
+          "satellite": {"min_pct": 0.01, "max_pct": 0.05},
+          "starter": {"min_pct": 0.005, "max_pct": 0.02}
+        }
+      },
+      "severity": "enforce"
+    },
+    {
+      "id": "sector_concentration",
+      "name": "Sector Concentration Limit",
+      "description": "Aggregate sector exposure should not exceed limit; diversifies away idiosyncratic sector risk.",
+      "trigger_rule": "sector_pct > max_sector_pct",
+      "parameters": {
+        "max_sector_pct": 0.30,
+        "gics_level": "sector",
+        "exclude_cash": true
+      },
+      "severity": "monitor"
+    }
+  ],
+  "meta": {
+    "portfolio_level_checks": ["position_sizing", "sector_concentration"],
+    "holding_level_checks": ["trim", "stop_loss", "restructure"],
+    "default_action_mapping": {
+      "trim": "trim",
+      "stop_loss": "stop_review",
+      "restructure": "restructure",
+      "position_sizing": "watch",
+      "sector_concentration": "ignore"
+    }
+  }
+}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -154,9 +154,21 @@ def migrate(conn: sqlite3.Connection) -> None:
         _migrate_v3(conn)
         _migrate_v4(conn)
         _migrate_v5(conn)
+        _migrate_v6(conn)
         _ensure_columns(conn)
         _backfill_legacy(conn)
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (SCHEMA_VERSION,))
+
+
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    """Return column names for an existing SQLite table."""
+    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    """Add a nullable/defaulted column to tolerate earlier partial V1 schemas."""
+    if column_name not in _table_columns(conn, table_name):
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def _migrate_v2(conn: sqlite3.Connection) -> None:
@@ -258,15 +270,80 @@ def _migrate_v5(conn: sqlite3.Connection) -> None:
     """)
 
 
-def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-    """Return column names for an existing SQLite table."""
-    return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table_name})")}
+def _migrate_v6(conn: sqlite3.Connection) -> None:
+    """V6: Decision workflow tables - persona scores, decision briefs, portfolio health checks."""
+    # Persona score snapshots - one row per ticker per persona per run
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS persona_score_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            pipeline_run_id INTEGER,
+            persona_id TEXT NOT NULL,
+            model_version TEXT NOT NULL DEFAULT 'v1',
+            score REAL NOT NULL,
+            rationale_json TEXT NOT NULL,
+            inputs_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(ticker) REFERENCES securities(ticker),
+            FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_persona_scores_ticker_run
+        ON persona_score_snapshots(ticker, pipeline_run_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_persona_scores_persona_run
+        ON persona_score_snapshots(persona_id, pipeline_run_id)
+    """)
 
+    # Decision briefs - daily action classification per ticker
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS decision_briefs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            pipeline_run_id INTEGER,
+            decision_type TEXT NOT NULL CHECK(decision_type IN ('ignore','watch','long_candidate','trim','stop_review','restructure')),
+            primary_persona TEXT NOT NULL,
+            compounder_score REAL,
+            tactical_score REAL,
+            threshold_met INTEGER NOT NULL DEFAULT 0,
+            rationale_json TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(ticker) REFERENCES securities(ticker),
+            FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+            UNIQUE(date, ticker)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_decision_briefs_date_type
+        ON decision_briefs(date, decision_type)
+    """)
 
-def _add_column_if_missing(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
-    """Add a nullable/defaulted column to tolerate earlier partial V1 schemas."""
-    if column_name not in _table_columns(conn, table_name):
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+    # Portfolio health checks - governance output per holding
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS portfolio_health_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            pipeline_run_id INTEGER,
+            check_type TEXT NOT NULL CHECK(check_type IN ('trim','stop_loss','restructure','position_sizing','sector_concentration')),
+            triggered INTEGER NOT NULL DEFAULT 0,
+            current_value REAL,
+            threshold_value REAL,
+            rationale_json TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(ticker) REFERENCES securities(ticker),
+            FOREIGN KEY(pipeline_run_id) REFERENCES pipeline_runs(id),
+            UNIQUE(date, ticker, check_type)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_portfolio_health_date_type
+        ON portfolio_health_checks(date, check_type)
+    """)
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:

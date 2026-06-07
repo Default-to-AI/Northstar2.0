@@ -1,0 +1,82 @@
+{
+  "version": "v1",
+  "description": "Deterministic persona scoring weights for decision workflow. All weights sum to 1.0 per persona.",
+  "personas": [
+    {
+      "id": "buffett",
+      "name": "Warren Buffett",
+      "philosophy": "Quality compounding at reasonable prices; durable moats, high ROIC, consistent FCF, honest management.",
+      "weights": {
+        "moat_strength": 0.25,
+        "roic_quality": 0.20,
+        "fcf_yield": 0.15,
+        "earnings_consistency": 0.15,
+        "capital_allocation": 0.10,
+        "valuation_margin": 0.10,
+        "balance_sheet": 0.05
+      },
+      "thresholds": {
+        "minimum_score": 65,
+        "strong_score": 80
+      }
+    },
+    {
+      "id": "hohn",
+      "name": "Chris Hohn",
+      "philosophy": "Concentrated activist value; mispriced compounders with catalyst, governance improvement, or capital return.",
+      "weights": {
+        "catalyst_proximity": 0.25,
+        "fcf_yield": 0.20,
+        "capital_return_potential": 0.18,
+        "governance_quality": 0.12,
+        "moat_durability": 0.10,
+        "valuation_discount": 0.10,
+        "liquidity": 0.05
+      },
+      "thresholds": {
+        "minimum_score": 70,
+        "strong_score": 85
+      }
+    },
+    {
+      "id": "micha_stocks",
+      "name": "Micha Stocks",
+      "philosophy": "Growth-at-reasonable-price with emphasis on revenue acceleration, expanding TAM, and inflection dynamics.",
+      "weights": {
+        "revenue_acceleration": 0.25,
+        "tam_expansion": 0.20,
+        "margin_trajectory": 0.15,
+        "unit_economics": 0.15,
+        "competitive_positioning": 0.10,
+        "valuation_context": 0.10,
+        "earnings_quality": 0.05
+      },
+      "thresholds": {
+        "minimum_score": 60,
+        "strong_score": 78
+      }
+    },
+    {
+      "id": "joseph_carlson",
+      "name": "Joseph Carlson",
+      "philosophy": "Dividend growth + total return; sustainable payout, defensive moat, rising income stream, reasonable entry.",
+      "weights": {
+        "dividend_safety": 0.25,
+        "dividend_growth": 0.20,
+        "payout_stability": 0.15,
+        "business_quality": 0.15,
+        "valuation_yield": 0.10,
+        "balance_sheet": 0.10,
+        "total_return_potential": 0.05
+      },
+      "thresholds": {
+        "minimum_score": 60,
+        "strong_score": 80
+      }
+    }
+  ],
+  "meta": {
+    "score_range": [0, 100],
+    "blending_note": "Each persona produces independent score. Decision synthesis uses primary_persona (highest score) + threshold_met gate."
+  }
+}

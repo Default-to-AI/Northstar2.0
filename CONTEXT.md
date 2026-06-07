@@ -83,4 +83,4 @@ Needed:
 
 ## Obsidian vault
 
-`~/Vault` (`/mnt/c/Users/Tiger/Vault`) is the second brain; Vault AGENTS.md governs access rules. Long-form thesis and research notes should live in Obsidian, with SQLite storing structured fields and links back to notes.
+`~/Vault` (`C:\Users\Tiger\Vault`) is the second brain; Vault AGENTS.md governs access rules. Long-form thesis and research notes should live in Obsidian, with SQLite storing structured fields and links back to notes.
